@@ -12,7 +12,7 @@ Reliably surface genuinely free physical goods (zero shipping, no coupons, no tr
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Offer validation cron (URL liveness + dead signal detection) — Validated in Phase 3: Offer Validation Cron
 
 ### Active
 
@@ -21,7 +21,6 @@ Reliably surface genuinely free physical goods (zero shipping, no coupons, no tr
 - [ ] Tier 1 Haiku binary classifier via pgmq worker
 - [ ] Tier 2 Sonnet structured extraction with exclusion checks via pgmq worker
 - [ ] Deduplication via URL hash matching and Voyage embedding cosine similarity
-- [ ] Offer validation cron (URL liveness + dead signal detection)
 - [ ] Dashboard with auth-gated offer list, status, and human review queue
 - [ ] All AI calls logged with tokens, cost, latency, prompt version
 - [ ] Low-confidence Tier 2 results route to human review queue
@@ -87,4 +86,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-20 after initialization*
+*Last updated: 2026-04-20 after Phase 3 completion*
