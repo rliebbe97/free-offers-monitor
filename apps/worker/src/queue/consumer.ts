@@ -1,4 +1,5 @@
 import type { createClient } from '@repo/db';
+import type { Json } from '@repo/db';
 import { logger } from '../logger.js';
 import { DLQ_RETRY_THRESHOLD } from '../config.js';
 
@@ -31,9 +32,9 @@ async function sendToDlq(
   msg: PgmqMessage,
   errorReason: string,
 ): Promise<void> {
-  const dlqPayload = {
+  const dlqPayload: Json = {
     original_msg_id: msg.msg_id,
-    original_message: msg.message,
+    original_message: msg.message as Json,
     read_ct: msg.read_ct,
     error: errorReason,
     failed_at: new Date().toISOString(),
