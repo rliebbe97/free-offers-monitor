@@ -1,0 +1,41 @@
+export function getEnvOrThrow(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Required environment variable is not set: ${name}`);
+  return value;
+}
+
+// Validate all required env vars at module load time — fail fast with clear messages
+getEnvOrThrow('ANTHROPIC_API_KEY');
+getEnvOrThrow('REDDIT_CLIENT_ID');
+getEnvOrThrow('REDDIT_CLIENT_SECRET');
+getEnvOrThrow('REDDIT_REFRESH_TOKEN');
+getEnvOrThrow('VOYAGE_API_KEY');
+
+// Model strings — pinned to dated versions (PITFALLS.md 4.3: never use unversioned aliases)
+export const TIER1_MODEL = 'claude-haiku-4-20250514';
+export const TIER2_MODEL = 'claude-sonnet-4-5-20250514';
+
+// Per-token pricing constants (USD)
+export const MODEL_PRICING = {
+  [TIER1_MODEL]: { input: 0.80 / 1_000_000, output: 4.00 / 1_000_000 },
+  [TIER2_MODEL]: { input: 3.00 / 1_000_000, output: 15.00 / 1_000_000 },
+} as const;
+
+// Pipeline constants
+export const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+export const POSTS_PER_POLL = 25;
+export const TIER1_VISIBILITY_TIMEOUT = 30; // seconds
+export const TIER2_VISIBILITY_TIMEOUT = 120; // seconds
+export const CONSUMER_BATCH_SIZE = 5;
+export const DLQ_RETRY_THRESHOLD = 3;
+export const EMBEDDING_SIMILARITY_THRESHOLD = 0.85;
+
+/**
+ * Compute the estimated USD cost of an AI call given model, input tokens, and output tokens.
+ * Throws if the model is not found in MODEL_PRICING.
+ */
+export function computeCost(model: string, inputTokens: number, outputTokens: number): number {
+  const pricing = MODEL_PRICING[model as keyof typeof MODEL_PRICING];
+  if (!pricing) throw new Error(`Unknown model for pricing: ${model}`);
+  return pricing.input * inputTokens + pricing.output * outputTokens;
+}
