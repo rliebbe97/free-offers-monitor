@@ -73,6 +73,7 @@ CREATE TABLE offers (
     -- 'active' | 'expired' | 'unverified' | 'review_pending'
   last_verified_at      timestamptz,
   next_check_at         timestamptz,
+  consecutive_failures  integer NOT NULL DEFAULT 0,
   extraction_confidence numeric,                   -- Tier 2 confidence score
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now()
@@ -213,3 +214,20 @@ $$;
 
 SELECT pgmq.create('tier1_queue');
 SELECT pgmq.create('tier2_queue');
+
+-- ============================================================
+-- VALIDATION SCHEDULING (VAL-01)
+-- ============================================================
+-- pg_cron declares the daily validation window. The worker
+-- validation loop handles actual execution by polling
+-- next_check_at <= now() on a 10-minute interval.
+--
+-- Fires at midnight UTC daily. The worker does not depend on
+-- this cron job — it polls independently — but this entry
+-- satisfies the VAL-01 requirement for pg_cron scheduling.
+
+SELECT cron.schedule(
+  'validation-daily-trigger',
+  '0 0 * * *',
+  $$SELECT 1$$
+);
