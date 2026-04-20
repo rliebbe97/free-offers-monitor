@@ -5,10 +5,11 @@ import { execSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@repo/db';
 import { logger } from './logger.js';
-import { POLL_INTERVAL_MS, TIER1_VISIBILITY_TIMEOUT, CONSUMER_BATCH_SIZE } from './config.js';
+import { POLL_INTERVAL_MS, TIER1_VISIBILITY_TIMEOUT, TIER2_VISIBILITY_TIMEOUT, CONSUMER_BATCH_SIZE } from './config.js';
 import { fetchActiveSources, runIngestionCycle } from './ingestion/ingest.js';
 import { runConsumerLoop, sleep } from './queue/consumer.js';
 import { processTier1 } from './tiers/tier1.js';
+import { processTier2 } from './tiers/tier2.js';
 
 type DbClient = ReturnType<typeof createClient>;
 
@@ -136,6 +137,28 @@ async function runTier1ConsumerLoop(
 }
 
 /**
+ * Tier 2 consumer loop — wraps runConsumerLoop with processTier2 handler.
+ */
+async function runTier2ConsumerLoop(
+  db: DbClient,
+  anthropic: Anthropic,
+  prompt: string,
+  promptVersion: string,
+  shutdown: { stop: boolean },
+): Promise<void> {
+  await runConsumerLoop({
+    db,
+    queueName: 'tier2_queue',
+    dlqName: 'tier2_dlq',
+    visibilityTimeout: TIER2_VISIBILITY_TIMEOUT,
+    batchSize: CONSUMER_BATCH_SIZE,
+    shutdown,
+    processMessage: (dbClient: DbClient, postId: string) =>
+      processTier2({ db: dbClient, anthropic, postId, prompt, promptVersion }),
+  });
+}
+
+/**
  * Worker entry point. Performs startup assertions, loads prompts, starts
  * the HTTP health endpoint, and runs the Reddit ingestion loop and Tier 1
  * consumer concurrently.
@@ -154,17 +177,8 @@ async function main(): Promise<void> {
   const tier1Prompt = readFileSync(path.join(promptsDir, 'tier1-classify.md'), 'utf-8');
   logger.info('prompts_loaded', { tier1_chars: tier1Prompt.length });
 
-  // tier2Prompt loaded here for Plan 02-03 use; graceful if not yet present
-  let tier2Prompt = '';
-  try {
-    tier2Prompt = readFileSync(path.join(promptsDir, 'tier2-extract.md'), 'utf-8');
-    logger.info('tier2_prompt_loaded', { tier2_chars: tier2Prompt.length });
-  } catch {
-    logger.warn('tier2_prompt_not_found', { path: path.join(promptsDir, 'tier2-extract.md') });
-  }
-
-  // Suppress unused variable warning — tier2Prompt consumed by Plan 02-03
-  void tier2Prompt;
+  const tier2Prompt = readFileSync(path.join(promptsDir, 'tier2-extract.md'), 'utf-8');
+  logger.info('tier2_prompt_loaded', { tier2_chars: tier2Prompt.length });
 
   // Initialize clients
   const db = createClient();
@@ -208,10 +222,11 @@ async function main(): Promise<void> {
 
   logger.info('worker_started', { port, prompt_version: promptVersion });
 
-  // Run Reddit polling loop and Tier 1 consumer concurrently
+  // Run Reddit polling loop, Tier 1 consumer, and Tier 2 consumer concurrently
   await Promise.all([
     runRedditIngestionLoop(db, shutdown),
     runTier1ConsumerLoop(db, anthropic, tier1Prompt, promptVersion, shutdown),
+    runTier2ConsumerLoop(db, anthropic, tier2Prompt, promptVersion, shutdown),
   ]);
 
   logger.info('worker_stopped');
