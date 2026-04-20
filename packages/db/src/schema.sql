@@ -167,6 +167,37 @@ AS $$
 $$;
 
 -- ============================================================
+-- DEDUP FUNCTIONS
+-- ============================================================
+-- Used by the worker dedup pipeline via db.rpc('find_similar_offer', ...).
+-- Sets ivfflat.probes within the function for consistent ANN recall.
+
+CREATE OR REPLACE FUNCTION find_similar_offer(
+  query_embedding vector(1024),
+  similarity_threshold float,
+  match_count int
+)
+RETURNS TABLE(id uuid, similarity float)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Set probes for this transaction (DDP-04)
+  PERFORM set_config('ivfflat.probes', '10', true);
+
+  RETURN QUERY
+  SELECT
+    offers.id,
+    (1 - (offers.embedding <=> query_embedding))::float AS similarity
+  FROM offers
+  WHERE offers.status = 'active'
+    AND offers.embedding IS NOT NULL
+    AND (1 - (offers.embedding <=> query_embedding)) >= similarity_threshold
+  ORDER BY offers.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+-- ============================================================
 -- QUEUES
 -- ============================================================
 -- Run after tables are created.
