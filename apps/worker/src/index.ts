@@ -10,6 +10,7 @@ import { fetchActiveSources, runIngestionCycle } from './ingestion/ingest.js';
 import { runConsumerLoop, sleep } from './queue/consumer.js';
 import { processTier1 } from './tiers/tier1.js';
 import { processTier2 } from './tiers/tier2.js';
+import { runValidationLoop } from './validation/validation-loop.js';
 
 type DbClient = ReturnType<typeof createClient>;
 
@@ -222,11 +223,12 @@ async function main(): Promise<void> {
 
   logger.info('worker_started', { port, prompt_version: promptVersion });
 
-  // Run Reddit polling loop, Tier 1 consumer, and Tier 2 consumer concurrently
+  // Run Reddit polling loop, Tier 1 consumer, Tier 2 consumer, and validation loop concurrently
   await Promise.all([
     runRedditIngestionLoop(db, shutdown),
     runTier1ConsumerLoop(db, anthropic, tier1Prompt, promptVersion, shutdown),
     runTier2ConsumerLoop(db, anthropic, tier2Prompt, promptVersion, shutdown),
+    runValidationLoop(db, shutdown),
   ]);
 
   logger.info('worker_stopped');
