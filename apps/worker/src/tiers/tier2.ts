@@ -208,7 +208,7 @@ export async function processTier2(options: ProcessTier2Options): Promise<void> 
     response = await anthropic.messages.create({
       model: TIER2_MODEL,
       max_tokens: 1024,
-      tools: [EXTRACT_OFFER_TOOL],
+      tools: [EXTRACT_OFFER_TOOL as unknown as Anthropic.Tool],
       tool_choice: { type: 'tool', name: 'extract_offer' },
       messages: [{ role: 'user', content: `${prompt}\n\n${postContent}` }],
     });
