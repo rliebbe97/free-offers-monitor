@@ -38,9 +38,9 @@ describe('checkLiveness', () => {
     expect(result.isLive).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
     // First call should be HEAD
-    expect(mockFetch.mock.calls[0][1]).toMatchObject({ method: 'HEAD' });
+    expect(mockFetch.mock.calls[0]![1]).toMatchObject({ method: 'HEAD' });
     // Second call should be GET
-    expect(mockFetch.mock.calls[1][1]).toMatchObject({ method: 'GET' });
+    expect(mockFetch.mock.calls[1]![1]).toMatchObject({ method: 'GET' });
   });
 
   it('GET 403 returns isWaf: true', async () => {
