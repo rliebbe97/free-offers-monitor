@@ -101,44 +101,44 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DB-01 | — | Pending |
-| DB-02 | — | Pending |
-| DB-03 | — | Pending |
-| DB-04 | — | Pending |
-| ING-01 | — | Pending |
-| ING-02 | — | Pending |
-| ING-03 | — | Pending |
-| ING-04 | — | Pending |
-| ING-05 | — | Pending |
-| CLS-01 | — | Pending |
-| CLS-02 | — | Pending |
-| CLS-03 | — | Pending |
-| CLS-04 | — | Pending |
-| CLS-05 | — | Pending |
-| CLS-06 | — | Pending |
-| DDP-01 | — | Pending |
-| DDP-02 | — | Pending |
-| DDP-03 | — | Pending |
-| DDP-04 | — | Pending |
-| VAL-01 | — | Pending |
-| VAL-02 | — | Pending |
-| VAL-03 | — | Pending |
-| VAL-04 | — | Pending |
-| VAL-05 | — | Pending |
-| LOG-01 | — | Pending |
-| LOG-02 | — | Pending |
-| DSH-01 | — | Pending |
-| DSH-02 | — | Pending |
-| DSH-03 | — | Pending |
-| DSH-04 | — | Pending |
-| WRK-01 | — | Pending |
-| WRK-02 | — | Pending |
-| WRK-03 | — | Pending |
+| DB-01 | 1 | Pending |
+| DB-02 | 1 | Pending |
+| DB-03 | 1 | Pending |
+| DB-04 | 1 | Pending |
+| ING-01 | 2 | Pending |
+| ING-02 | 2 | Pending |
+| ING-03 | 2 | Pending |
+| ING-04 | 2 | Pending |
+| ING-05 | 2 | Pending |
+| CLS-01 | 2 | Pending |
+| CLS-02 | 2 | Pending |
+| CLS-03 | 2 | Pending |
+| CLS-04 | 2 | Pending |
+| CLS-05 | 2 | Pending |
+| CLS-06 | 2 | Pending |
+| DDP-01 | 2 | Pending |
+| DDP-02 | 2 | Pending |
+| DDP-03 | 2 | Pending |
+| DDP-04 | 2 | Pending |
+| VAL-01 | 3 | Pending |
+| VAL-02 | 3 | Pending |
+| VAL-03 | 3 | Pending |
+| VAL-04 | 3 | Pending |
+| VAL-05 | 3 | Pending |
+| LOG-01 | 2 | Pending |
+| LOG-02 | 2 | Pending |
+| DSH-01 | 4 | Pending |
+| DSH-02 | 4 | Pending |
+| DSH-03 | 4 | Pending |
+| DSH-04 | 4 | Pending |
+| WRK-01 | 2 | Pending |
+| WRK-02 | 2 | Pending |
+| WRK-03 | 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 33 total
-- Mapped to phases: 0
-- Unmapped: 33
+- Mapped to phases: 33
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-20*
