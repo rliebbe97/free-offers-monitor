@@ -30,6 +30,17 @@ export const CONSUMER_BATCH_SIZE = 5;
 export const DLQ_RETRY_THRESHOLD = 3;
 export const EMBEDDING_SIMILARITY_THRESHOLD = 0.85;
 
+// Validation loop constants
+export const VALIDATION_POLL_INTERVAL_MS = 10 * 60 * 1000;   // 10 minutes
+export const VALIDATION_CHECK_INTERVAL_DAYS = 7;              // normal recheck cycle
+export const VALIDATION_RETRY_INTERVAL_HOURS = 24;            // after first failure
+export const VALIDATION_WAF_RETRY_INTERVAL_HOURS = 6;         // after 403/429 WAF block
+export const VALIDATION_REQUEST_TIMEOUT_MS = 10_000;          // 10 seconds per URL
+export const VALIDATION_MAX_REDIRECTS = 5;                    // max redirect hops
+export const VALIDATION_JITTER_HOURS = 6;                     // max random jitter spread
+export const VALIDATION_CONCURRENT_LIMIT = 5;                 // max concurrent requests
+export const VALIDATION_RAW_RESPONSE_MAX_CHARS = 2_000;       // verification_log truncation
+
 /**
  * Compute the estimated USD cost of an AI call given model, input tokens, and output tokens.
  * Throws if the model is not found in MODEL_PRICING.

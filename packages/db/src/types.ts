@@ -111,6 +111,7 @@ export interface Database {
           status: string;
           last_verified_at: string | null;
           next_check_at: string | null;
+          consecutive_failures: number;
           extraction_confidence: number | null;
           created_at: string;
           updated_at: string;
@@ -130,6 +131,7 @@ export interface Database {
           status?: string;
           last_verified_at?: string | null;
           next_check_at?: string | null;
+          consecutive_failures?: number;
           extraction_confidence?: number | null;
           created_at?: string;
           updated_at?: string;
@@ -149,6 +151,7 @@ export interface Database {
           status?: string;
           last_verified_at?: string | null;
           next_check_at?: string | null;
+          consecutive_failures?: number;
           extraction_confidence?: number | null;
           created_at?: string;
           updated_at?: string;
