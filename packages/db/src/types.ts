@@ -325,6 +325,12 @@ export interface Database {
         };
         Returns: boolean;
       };
+      pgmq_create: {
+        Args: {
+          queue_name: string;
+        };
+        Returns: void;
+      };
       find_similar_offer: {
         Args: {
           query_embedding: string;
