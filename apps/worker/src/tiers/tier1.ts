@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { createClient } from '@repo/db';
+import type { Json } from '@repo/db';
 import { logger } from '../logger.js';
 import { TIER1_MODEL, computeCost } from '../config.js';
 import { enqueueTier2 } from '../queue/producer.js';
@@ -31,8 +32,8 @@ async function logAiCall(
     outputTokens: number;
     costUsd: number;
     latencyMs: number;
-    requestPayload: Record<string, unknown>;
-    responsePayload: Record<string, unknown> | null;
+    requestPayload: Json;
+    responsePayload: Json | null;
     error: string | null;
   },
 ): Promise<void> {
@@ -123,7 +124,7 @@ export async function processTier1(options: ProcessTier1Options): Promise<void> 
   }
 
   const postContent = `Title: ${post.title ?? ''}\n\nBody: ${post.body ?? ''}`;
-  const requestPayload: Record<string, unknown> = {
+  const requestPayload: Json = {
     model: TIER1_MODEL,
     max_tokens: 256,
     messages: [{ role: 'user', content: `${prompt}\n\n${postContent}` }],
@@ -171,9 +172,9 @@ export async function processTier1(options: ProcessTier1Options): Promise<void> 
   }
 
   const costUsd = computeCost(TIER1_MODEL, inputTokens, outputTokens);
-  const responsePayload: Record<string, unknown> = {
-    stop_reason: response.stop_reason,
-    usage: response.usage,
+  const responsePayload: Json = {
+    stop_reason: response.stop_reason as string | null,
+    usage: { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens },
     content: rawText.slice(0, 1000), // truncate for storage
   };
 
