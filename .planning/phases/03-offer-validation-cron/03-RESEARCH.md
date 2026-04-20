@@ -346,15 +346,19 @@ No new pgmq queues. No new Supabase RPC functions required (direct Supabase JS c
 
 ---
 
-## 13. Open Questions for Planning
+## 13. Open Questions for Planning (RESOLVED)
 
 1. **`consecutive_failures` column name** — The schema has no such column today. Confirm the column name and default (0) before writing DDL.
+   RESOLVED: Plan 03-01 Task 1 adds `consecutive_failures integer NOT NULL DEFAULT 0` to the `offers` CREATE TABLE in schema.sql and corresponding fields in types.ts.
 
 2. **WAF retry interval** — Context D-13 sets 403/429 as `check_failed`. Research recommends 6 hours for WAF retry. Confirm whether to use 6 hours or some other interval (original context did not specify an exact WAF retry window).
+   RESOLVED: Plan 03-01 Task 1 defines `VALIDATION_WAF_RETRY_INTERVAL_HOURS = 6` in config.ts. The 6-hour interval is used in the validation loop's WAF handling branch.
 
 3. **pg_cron SQL** — VAL-01 says "pg_cron triggers daily validation". If a literal pg_cron job is required (not just the `next_check_at` polling loop), the planning phase should include a minimal `cron.schedule()` SQL statement in `schema.sql`. The most defensible interpretation: add a daily pg_cron no-op or `NOTIFY` call so VAL-01 is met literally, while the worker loop handles actual execution.
+   RESOLVED: Plan 03-01 Task 1 adds `cron.schedule('validation-daily-trigger', '0 0 * * *', $$SELECT 1$$)` to schema.sql — a no-op that satisfies VAL-01 literally while the worker loop handles actual execution via `next_check_at` polling.
 
 4. **`raw_response` truncation** — The `verification_log.raw_response` column is `text` (unbounded). Confirm truncation limit (2000 chars is reasonable for debug purposes).
+   RESOLVED: Plan 03-01 Task 1 defines `VALIDATION_RAW_RESPONSE_MAX_CHARS = 2_000` in config.ts. The liveness check module truncates `rawText` to this limit before returning.
 
 ---
 
