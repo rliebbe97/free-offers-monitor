@@ -42,6 +42,7 @@ export interface Database {
           last_polled_at?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       posts: {
         Row: {
@@ -92,6 +93,7 @@ export interface Database {
           error_detail?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       offers: {
         Row: {
@@ -151,6 +153,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       post_offers: {
         Row: {
@@ -168,6 +171,7 @@ export interface Database {
           offer_id?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
       verification_log: {
         Row: {
@@ -197,6 +201,7 @@ export interface Database {
           dead_signals?: string[] | null;
           raw_response?: string | null;
         };
+        Relationships: [];
       };
       human_review_queue: {
         Row: {
@@ -232,6 +237,7 @@ export interface Database {
           created_at?: string;
           reviewed_at?: string | null;
         };
+        Relationships: [];
       };
       ai_calls: {
         Row: {
@@ -279,6 +285,7 @@ export interface Database {
           error?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
@@ -288,6 +295,45 @@ export interface Database {
         Returns: Array<{
           extname: string;
           installed: boolean;
+        }>;
+      };
+      pgmq_send: {
+        Args: {
+          queue_name: string;
+          msg: Json;
+        };
+        Returns: number;
+      };
+      pgmq_read: {
+        Args: {
+          queue_name: string;
+          vt: number;
+          qty: number;
+        };
+        Returns: Array<{
+          msg_id: number;
+          read_ct: number;
+          enqueued_at: string;
+          vt: string;
+          message: Json;
+        }>;
+      };
+      pgmq_archive: {
+        Args: {
+          queue_name: string;
+          msg_id: number;
+        };
+        Returns: boolean;
+      };
+      find_similar_offer: {
+        Args: {
+          query_embedding: string;
+          similarity_threshold: number;
+          match_count: number;
+        };
+        Returns: Array<{
+          id: string;
+          similarity: number;
         }>;
       };
     };
