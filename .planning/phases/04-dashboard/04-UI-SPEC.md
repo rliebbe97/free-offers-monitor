@@ -49,17 +49,19 @@ Exceptions: Touch targets for Approve/Reject buttons must be at minimum 44px hei
 
 ## Typography
 
+Two weights only: 400 (regular) for all default/body states, 600 (semibold) for all emphasized elements.
+
 | Role | Size | Weight | Line Height | Font |
 |------|------|--------|-------------|------|
 | Body | 14px | 400 (regular) | 1.5 | Geist Sans |
-| Label | 12px | 500 (medium) | 1.3 | Geist Sans |
+| Label | 12px | 400 (regular) | 1.3 | Geist Sans |
 | Heading | 20px | 600 (semibold) | 1.2 | Geist Sans |
 | Display | 28px | 600 (semibold) | 1.1 | Geist Sans |
 
 Notes:
 - Monospace values (prompt_version hash, cost_usd, latency_ms cells) use Geist Mono at 12px weight 400.
-- Table column headers use Label (12px, weight 500, uppercase, letter-spacing 0.05em).
-- Sidebar nav labels use Body (14px, weight 400 default, weight 500 when active).
+- Table column headers use Label (12px, weight 400, uppercase, letter-spacing 0.05em).
+- Sidebar nav labels use Body (14px, weight 400 default, weight 600 when active).
 
 ---
 
@@ -221,6 +223,14 @@ All components are from the official shadcn registry. No third-party registries.
 - Data fetch errors: inline error card above the table with error message copy and "Refresh" link.
 - Authentication error (non-allowlisted user): inline error below login form, no toast.
 - Server action errors (approve/reject): error toast only, no page reload.
+
+---
+
+## Focal Point
+
+Primary screen: `/dashboard/offers`
+
+The primary visual anchor is the **offer status badge column** within the data table. The `active` green badge is the highest-contrast element on the dominant white surface and draws the eye first, immediately communicating pipeline health. The page heading "Offers" and the filter bar are secondary anchors, establishing context before the user scans the table.
 
 ---
 
