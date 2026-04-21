@@ -82,7 +82,8 @@
 
 ### Plans
 
-1. Dashboard — Supabase Auth email allowlist gate, offer list page (pagination, filter by status, sort), human review queue page (approve/reject actions), AI call log viewer
+- [ ] 04-01-PLAN.md — Auth infrastructure, Supabase client factories, proxy.ts, login page, dashboard layout shell with sidebar and header
+- [ ] 04-02-PLAN.md — Offer list (pagination/filter/sort), review queue (approve/reject server actions), AI call log viewer (sortable columns)
 
 ---
 
