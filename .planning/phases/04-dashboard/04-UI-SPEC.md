@@ -1,10 +1,11 @@
 ---
 phase: 4
 slug: dashboard
-status: draft
+status: approved
 shadcn_initialized: true
 preset: radix-nova / neutral base / CSS variables
 created: 2026-04-20
+reviewed_at: 2026-04-20
 ---
 
 # Phase 4 — UI Design Contract
