@@ -8,6 +8,14 @@ An automated pipeline that scans Reddit for genuinely free physical goods offeri
 
 Reliably surface genuinely free physical goods (zero shipping, no coupons, no trials, no sweepstakes) from noisy forum data — false negatives cost missed offers, false positives erode trust.
 
+## Current Milestone: v1.1 Forum Adapters
+
+**Goal:** Expand ingestion beyond Reddit with a TheBump community adapter and reusable adapter infrastructure.
+
+**Target features:**
+- TheBump community adapter (freebies/deals subforums, Cheerio scraping, feeds into existing 3-tier pipeline)
+- Shared adapter infrastructure (base classes, shared scraping utilities, config-driven source registration extracted from Reddit + TheBump patterns)
+
 ## Current State
 
 **Shipped:** v1.0 MVP (2026-04-21)
@@ -38,12 +46,8 @@ The full pipeline is built: Reddit ingestion -> Tier 0 keyword filter -> Tier 1 
 
 ### Active
 
-- [ ] Discourse/forum adapters beyond Reddit
-- [ ] Email digest of new verified offers
-- [ ] Pipeline throughput metrics dashboard
-- [ ] AI cost tracking with daily/weekly aggregates
-- [ ] Bulk approve/reject in review queue
-- [ ] Offer edit capability for correcting extracted data
+- [ ] TheBump community adapter (freebies/deals subforums, Cheerio scraping)
+- [ ] Shared adapter infrastructure (base classes, scraping utilities, config-driven source registration)
 
 ### Out of Scope
 
@@ -52,6 +56,12 @@ The full pipeline is built: Reddit ingestion -> Tier 0 keyword filter -> Tier 1 
 - Auto-modifying Tier 0 keyword list — human decides, system only suggests
 - LangChain / Vercel AI SDK / AI wrappers — use @anthropic-ai/sdk directly
 - Auto-publishing low-confidence offers — < 0.7 confidence always routes to human review
+- Email digest of new verified offers — deferred to future milestone
+- Pipeline throughput metrics dashboard — deferred to future milestone
+- AI cost tracking with daily/weekly aggregates — deferred to future milestone
+- Bulk approve/reject in review queue — deferred to future milestone
+- Offer edit capability for correcting extracted data — deferred to future milestone
+- CLI adapter builder flow — deferred to backlog
 
 ## Context
 
@@ -104,4 +114,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after v1.0 milestone*
+*Last updated: 2026-04-21 after v1.1 milestone start*

@@ -1,23 +1,23 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MVP
+milestone: v1.1
+milestone_name: Forum Adapters
 current_phase: --
-status: milestone_complete
+status: defining_requirements
 last_updated: "2026-04-21"
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 **Project:** Free Offers Monitor
 **Current Phase:** --
-**Status:** v1.0 Milestone Complete
+**Status:** Defining requirements
 
 ## Project Reference
 
@@ -26,22 +26,20 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 **Core value:** Reliably surface genuinely free physical goods from noisy forum data
 **Current focus:** Planning next milestone
 
-## Phase Progress
+## Current Position
 
-| Phase | Name | Status | Plans |
-|-------|------|--------|-------|
-| 1 | DB Foundation & Shared Package | Complete | 1/1 |
-| 2 | Worker Pipeline — Ingestion, Classification, Dedup & Logging | Complete | 3/3 |
-| 3 | Offer Validation Cron | Complete | 1/1 |
-| 4 | Dashboard | Complete | 2/2 |
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-21 — Milestone v1.1 started
 
-## Deferred Items
+## Accumulated Context
 
-Items acknowledged and deferred at milestone close on 2026-04-21:
+Items carried from previous milestone:
 
 | Category | Item | Status |
 |----------|------|--------|
 | verification | Phase 04: 04-VERIFICATION.md | human_needed |
 
 ---
-*Last updated: 2026-04-21 after v1.0 milestone completion*
+*Last updated: 2026-04-21 after milestone v1.1 start*
