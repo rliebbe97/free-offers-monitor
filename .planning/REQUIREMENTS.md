@@ -74,26 +74,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INGEST-01 | — | Pending |
-| INGEST-02 | — | Pending |
-| INGEST-03 | — | Pending |
-| INGEST-04 | — | Pending |
-| INGEST-05 | — | Pending |
-| BUMP-01 | — | Pending |
-| BUMP-02 | — | Pending |
-| BUMP-03 | — | Pending |
-| BUMP-04 | — | Pending |
-| BUMP-05 | — | Pending |
-| BUMP-06 | — | Pending |
-| BUMP-07 | — | Pending |
-| BUMP-08 | — | Pending |
-| QUAL-01 | — | Pending |
-| QUAL-02 | — | Pending |
+| INGEST-01 | 5 | Mapped |
+| INGEST-02 | 5 | Mapped |
+| INGEST-03 | 6 | Mapped |
+| INGEST-04 | 6 | Mapped |
+| INGEST-05 | 5 | Mapped |
+| BUMP-01 | 5 | Mapped |
+| BUMP-02 | 5 | Mapped |
+| BUMP-03 | 5 | Mapped |
+| BUMP-04 | 5 | Mapped |
+| BUMP-05 | 5 | Mapped |
+| BUMP-06 | 5 | Mapped |
+| BUMP-07 | 5 | Mapped |
+| BUMP-08 | 5 | Mapped |
+| QUAL-01 | 5 | Mapped |
+| QUAL-02 | 6 | Mapped |
 
 **Coverage:**
 - v1.1 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 ⚠️
+- Mapped to phases: 15
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-21*
