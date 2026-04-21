@@ -58,7 +58,7 @@ export default async function ReviewPage() {
 
       {!error && data && data.length > 0 && (
         <ReviewTable
-          items={(data as RawReviewItem[]).map((item) => ({
+          items={(data as unknown as RawReviewItem[]).map((item) => ({
             ...item,
             posts: Array.isArray(item.posts) ? item.posts[0] ?? null : item.posts,
           }))}

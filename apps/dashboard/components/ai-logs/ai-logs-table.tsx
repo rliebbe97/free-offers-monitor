@@ -9,10 +9,21 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import type { AiCall } from '@repo/db';
+type AiCallRow = {
+  id: string;
+  tier: number;
+  model: string;
+  prompt_version: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  latency_ms: number;
+  created_at: string;
+  error: string | null;
+};
 
 type Props = {
-  calls: AiCall[];
+  calls: AiCallRow[];
   currentSort: string;
   currentDir: string;
 };
