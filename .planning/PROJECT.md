@@ -2,50 +2,65 @@
 
 ## What This Is
 
-An automated pipeline that scans Reddit and forums for genuinely free physical goods offerings for new mothers and families with babies. It uses a three-tier AI classification system (keyword filter, Haiku classifier, Sonnet extractor) with deduplication via URL hashing and Voyage embeddings, surfacing verified offers through a dashboard.
+An automated pipeline that scans Reddit for genuinely free physical goods offerings for new mothers and families with babies. It uses a three-tier AI classification system (keyword filter, Haiku classifier, Sonnet extractor) with deduplication via URL hashing and Voyage embeddings, validates offer liveness daily, and surfaces verified offers through an auth-gated Next.js dashboard with review queue capabilities.
 
 ## Core Value
 
 Reliably surface genuinely free physical goods (zero shipping, no coupons, no trials, no sweepstakes) from noisy forum data — false negatives cost missed offers, false positives erode trust.
 
+## Current State
+
+**Shipped:** v1.0 MVP (2026-04-21)
+**Codebase:** ~27,365 LOC TypeScript across monorepo (pnpm workspaces + Turborepo)
+**Tech stack:** Next.js 14, Supabase (Postgres + pgvector + pgmq + pg_cron), @anthropic-ai/sdk, Voyage AI, snoowrap, Cheerio
+
+The full pipeline is built: Reddit ingestion -> Tier 0 keyword filter -> Tier 1 Haiku classifier -> Tier 2 Sonnet extractor -> URL hash + embedding dedup -> offer creation -> daily validation cron -> dashboard with auth, offer list, review queue, and AI call log viewer.
+
 ## Requirements
 
 ### Validated
 
-- [x] Offer validation cron (URL liveness + dead signal detection) — Validated in Phase 3: Offer Validation Cron
-- [x] Dashboard with auth-gated offer list, status, and human review queue — Validated in Phase 4: Dashboard
+- ✓ Supabase DB with pgvector, pgmq, pg_cron and 7 tables — v1.0
+- ✓ Shared @repo/db typed client package — v1.0
+- ✓ Reddit ingestion pipeline with snoowrap OAuth — v1.0
+- ✓ Tier 0 keyword filter (25 hand-maintained terms) — v1.0
+- ✓ Tier 1 Haiku binary classifier via pgmq — v1.0
+- ✓ Tier 2 Sonnet structured extraction with forced tool use — v1.0
+- ✓ Exclusion checks (coupons, services, shipping, trials, sweepstakes) — v1.0
+- ✓ URL hash + Voyage embedding cosine dedup — v1.0
+- ✓ All AI calls logged with tokens, cost, latency, prompt version — v1.0
+- ✓ Low-confidence routing to human review queue — v1.0
+- ✓ Offer validation cron with two-failure expiry — v1.0
+- ✓ Auth-gated dashboard with email allowlist — v1.0
+- ✓ Offer list with pagination, filter, sort — v1.0
+- ✓ Review queue with approve/reject actions — v1.0
+- ✓ AI call log viewer with sortable columns — v1.0
 
 ### Active
 
-- [ ] Reddit ingestion pipeline polls subreddits and extracts posts with comments
-- [ ] Tier 0 keyword filter with high-recall hand-maintained list
-- [ ] Tier 1 Haiku binary classifier via pgmq worker
-- [ ] Tier 2 Sonnet structured extraction with exclusion checks via pgmq worker
-- [ ] Deduplication via URL hash matching and Voyage embedding cosine similarity
-- [ ] All AI calls logged with tokens, cost, latency, prompt version
-- [ ] Low-confidence Tier 2 results route to human review queue
+- [ ] Discourse/forum adapters beyond Reddit
+- [ ] Email digest of new verified offers
+- [ ] Pipeline throughput metrics dashboard
+- [ ] AI cost tracking with daily/weekly aggregates
+- [ ] Bulk approve/reject in review queue
+- [ ] Offer edit capability for correcting extracted data
 
 ### Out of Scope
 
-- Discourse/forum adapters beyond Reddit — deferred to future milestone
-- Mobile app — web dashboard first
-- Public-facing UI — internal/allowlist auth only
-- Auto-adding keywords to Tier 0 — human decides, system only suggests
-- Real-time notifications — polling-based dashboard is sufficient for v1
+- Mobile app — web dashboard sufficient for internal use
+- Public-facing UI — internal tool with email allowlist auth
+- Auto-modifying Tier 0 keyword list — human decides, system only suggests
+- LangChain / Vercel AI SDK / AI wrappers — use @anthropic-ai/sdk directly
+- Auto-publishing low-confidence offers — < 0.7 confidence always routes to human review
 
 ## Context
 
-- Monorepo already scaffolded: pnpm workspaces + Turborepo
-- Dashboard app exists (Next.js 14 App Router + shadcn/ui, deploying to Vercel)
-- Worker app scaffolded (Node.js/TypeScript, deploying to Railway)
-- Shared `@repo/db` package scaffolded for Supabase client + types
-- Database: Supabase (Postgres + pgvector + pgmq + pg_cron)
-- AI: `@anthropic-ai/sdk` directly — no LangChain, no Vercel AI SDK
-- Embeddings: Voyage AI, 1024-dim vectors in pgvector
-- Reddit: snoowrap (types are incomplete, expect `@ts-ignore` on some responses)
-- Queue: pgmq (Postgres-native, messages need explicit `archive()`)
-- Auth: Supabase Auth with email allowlist
-- Testing: Vitest
+Shipped v1.0 MVP with ~27,365 LOC TypeScript.
+Tech stack: Next.js 14, Supabase, @anthropic-ai/sdk (Haiku + Sonnet), Voyage AI, snoowrap, Cheerio.
+Worker runs 4 concurrent loops: Reddit ingestion, Tier 1, Tier 2, validation.
+Dashboard deploys to Vercel, worker to Railway.
+13 Vitest tests for validation module.
+Hand-written DB types — run `pnpm db:generate` against live Supabase to reconcile.
 
 ## Constraints
 
@@ -62,22 +77,25 @@ Reliably surface genuinely free physical goods (zero shipping, no coupons, no tr
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Three-tier classification (keyword → Haiku → Sonnet) | Balances cost and accuracy — cheap filter first, expensive extraction only on candidates | — Pending |
-| pgmq over external queue (SQS/RabbitMQ) | Keeps everything in Postgres, no extra infra, native pg_cron integration | — Pending |
-| Voyage AI for embeddings over OpenAI | Better quality for semantic dedup at competitive pricing | — Pending |
-| snoowrap for Reddit API | Most mature Node.js Reddit wrapper despite incomplete types | — Pending |
-| Supabase over raw Postgres | Auth, Vault, pgvector, pgmq, pg_cron all in one managed platform | — Pending |
+| Three-tier classification (keyword -> Haiku -> Sonnet) | Balances cost and accuracy — cheap filter first, expensive extraction only on candidates | ✓ Good — clean separation of concerns, easy to tune each tier independently |
+| pgmq over external queue (SQS/RabbitMQ) | Keeps everything in Postgres, no extra infra, native pg_cron integration | ✓ Good — simplified ops, DLQ pattern works well |
+| Voyage AI for embeddings over OpenAI | Better quality for semantic dedup at competitive pricing | ✓ Good — 1024-dim embeddings with pgvector cosine works cleanly |
+| snoowrap for Reddit API | Most mature Node.js Reddit wrapper despite incomplete types | ⚠️ Revisit — types incomplete, required @ts-ignore; consider raw API in v2 |
+| Supabase over raw Postgres | Auth, Vault, pgvector, pgmq, pg_cron all in one managed platform | ✓ Good — rapid development, single platform for all needs |
+| Next.js 16 proxy over middleware | Newer API replaces deprecated middleware for session gating | ✓ Good — cleaner request interception |
+| Forced tool use for Tier 2 | Guarantees structured output from Sonnet without parsing ambiguity | ✓ Good — Zod validation catches malformed outputs reliably |
+| Two-consecutive-failure expiry | Avoids false expiry from transient network issues | ✓ Good — WAF detection prevents false positives from 403/429 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 **After each phase transition** (via `/gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
+1. Requirements invalidated? -> Move to Out of Scope with reason
+2. Requirements validated? -> Move to Validated with phase reference
+3. New requirements emerged? -> Add to Active
+4. Decisions to log? -> Add to Key Decisions
+5. "What This Is" still accurate? -> Update if drifted
 
 **After each milestone** (via `/gsd-complete-milestone`):
 1. Full review of all sections
@@ -86,4 +104,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after Phase 4 completion*
+*Last updated: 2026-04-21 after v1.0 milestone*
