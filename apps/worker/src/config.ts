@@ -30,6 +30,12 @@ export const CONSUMER_BATCH_SIZE = 5;
 export const DLQ_RETRY_THRESHOLD = 3;
 export const EMBEDDING_SIMILARITY_THRESHOLD = 0.85;
 
+// Scraping constants (INGEST-05)
+export const SCRAPING_REQUEST_TIMEOUT_MS = 15_000;
+export const SCRAPING_MAX_RETRIES = 3;
+export const SCRAPING_MAX_PAGES = 10;
+export const THEBUMP_BASE_URL = process.env.THEBUMP_BASE_URL ?? 'https://community.thebump.com';
+
 // Validation loop constants
 export const VALIDATION_POLL_INTERVAL_MS = 10 * 60 * 1000;   // 10 minutes
 export const VALIDATION_CHECK_INTERVAL_DAYS = 7;              // normal recheck cycle
