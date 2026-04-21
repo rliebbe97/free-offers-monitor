@@ -1,462 +1,341 @@
-# Architecture Research: Free Offers Monitor
+# Architecture Research
 
-*Researched: 2026-04-20*
+**Domain:** Forum scraping adapter infrastructure
+**Researched:** 2026-04-21
+**Confidence:** HIGH
 
 ---
 
-## 1. Component Boundaries
+## Standard Architecture
 
-### `apps/worker` — Long-running Node.js service (Railway)
+### System Overview
 
-The worker owns the entire pipeline. It is the only component that writes to `posts`, `offers`, `post_offers`, `ai_calls`, `human_review_queue`, and `verification_log`. It never exposes HTTP endpoints in production — it drives itself via polling loops and pgmq consumers.
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                               WORKER (Railway)                                 │
+│                                                                                │
+│  ┌──────────────────────────────────────────────────────────────────────────┐  │
+│  │  Ingestion Layer (apps/worker/src/ingestion/)                            │  │
+│  │                                                                          │  │
+│  │  ┌──────────────────────────────────────────────────────────────────┐   │  │
+│  │  │  Shared adapter infrastructure (NEW v1.1)                        │   │  │
+│  │  │  ┌─────────────────┐   ┌────────────────────────────────────┐   │   │  │
+│  │  │  │  SourceAdapter  │   │  BaseForumAdapter (abstract class)  │   │   │  │
+│  │  │  │  interface      │   │  - fetchPage(url): Cheerio root     │   │   │  │
+│  │  │  │  (EXISTING)     │   │  - normalizePost(raw): RawPost      │   │   │  │
+│  │  │  └────────┬────────┘   │  - shouldSkipPost(raw): boolean     │   │   │  │
+│  │  │           │ implements  └────────────────────┬───────────────┘   │   │  │
+│  │  │           │                                  │ extends            │   │  │
+│  │  │  ┌────────┴──────────────┐    ┌─────────────┴──────────────┐    │   │  │
+│  │  │  │  RedditAdapter        │    │  TheBumpAdapter (NEW v1.1)  │    │   │  │
+│  │  │  │  (EXISTING)           │    │  - Cheerio scraping         │    │   │  │
+│  │  │  │  - snoowrap OAuth     │    │  - freebies/deals subforums │    │   │  │
+│  │  │  │  - top-level comments │    │  - pagination handling      │    │   │  │
+│  │  │  │  + one reply deep     │    │  - thread-level scraping    │    │   │  │
+│  │  │  └───────────────────────┘    └────────────────────────────┘    │   │  │
+│  │  └──────────────────────────────────────────────────────────────────┘   │  │
+│  │                                                                          │  │
+│  │  ┌────────────────────────────────────────────────────────────────────┐ │  │
+│  │  │  Adapter registry / ingest.ts (MODIFIED v1.1)                      │ │  │
+│  │  │  - fetchActiveSources() now fetches type='reddit' AND type='bump'  │ │  │
+│  │  │  - createAdapterForSource(source) factory resolves adapter by type  │ │  │
+│  │  │  - runIngestionCycle() is source-type-agnostic                     │ │  │
+│  │  └────────────────────────────────────────────────────────────────────┘ │  │
+│  └──────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │  Pipeline (unchanged from v1.0)                                         │   │
+│  │  Tier 0 → tier1_queue → Tier 1 (Haiku) → tier2_queue                   │   │
+│  │         → Tier 2 (Sonnet) → dedup → offers / human_review_queue        │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │  Validation loop (unchanged from v1.0)                                  │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                │
+│  Concurrent loops (index.ts — MODIFIED v1.1):                                  │
+│  Promise.all([                                                                 │
+│    runIngestionLoop(db, shutdown),     ← renamed; now multi-adapter            │
+│    runTier1ConsumerLoop(...),          ← unchanged                             │
+│    runTier2ConsumerLoop(...),          ← unchanged                             │
+│    runValidationLoop(...),             ← unchanged                             │
+│  ])                                                                            │
+└────────────────────────────────────────────────────────────────────────────────┘
 
-**Responsibilities:**
-- Ingestion adapters (Reddit via snoowrap, future Discourse)
-- Tier 0 inline keyword filter
-- Tier 1 pgmq consumer — Haiku binary classifier
-- Tier 2 pgmq consumer — Sonnet structured extractor
-- Dedup logic (URL hash lookup, Voyage embedding cosine check)
-- Validation cron handler (URL liveness, dead signal scan)
-- Logging all AI calls to `ai_calls` table
-- Routing low-confidence Tier 2 results to `human_review_queue`
+DB: sources table drives adapter dispatch
+  sources.type = 'reddit' → RedditAdapter
+  sources.type = 'bump'   → TheBumpAdapter
+```
 
-**Does NOT own:**
-- Auth, sessions, or dashboard rendering
-- Reading from `human_review_queue` to approve/reject (that's dashboard territory)
-- Serving any external HTTP traffic
+### Component Responsibilities
 
-**Internal module layout (to be built):**
+| Component | Location | Status | Owns |
+|-----------|----------|--------|------|
+| `SourceAdapter` interface | `ingestion/source-adapter.ts` | EXISTING — no change | Contract: `fetchNewPosts(since: Date): Promise<RawPost[]>` |
+| `RawPost` type | `ingestion/source-adapter.ts` | EXISTING — no change | Data shape adapter outputs: external_id, url, title, body, author, posted_at |
+| `RedditAdapter` | `ingestion/reddit-adapter.ts` | EXISTING — no change | snoowrap OAuth, bot filtering, top-level + one-reply-deep traversal |
+| `BaseForumAdapter` | `ingestion/base-forum-adapter.ts` | NEW | Cheerio page fetching, retry/error handling, shared post-filtering logic |
+| `TheBumpAdapter` | `ingestion/thebump-adapter.ts` | NEW | TheBump-specific URL patterns, CSS selectors, subforum pagination, thread parsing |
+| `createAdapterForSource()` | `ingestion/ingest.ts` | MODIFIED | Factory: resolves source type → adapter instance |
+| `fetchActiveSources()` | `ingestion/ingest.ts` | MODIFIED | Remove `.eq('type', 'reddit')` filter — fetch all active sources |
+| `runIngestionLoop()` | `apps/worker/src/index.ts` | MODIFIED (rename only) | Rename `runRedditIngestionLoop` → `runIngestionLoop`; no logic change |
+| `scraping-utils.ts` | `ingestion/scraping-utils.ts` | NEW | Shared: `fetchWithRetry()`, `followOneRedirect()`, User-Agent rotation, rate-limit sleep |
+| `config.ts` | `apps/worker/src/config.ts` | MODIFIED | Add `THEBUMP_POLL_INTERVAL_MS`, `SCRAPING_REQUEST_TIMEOUT_MS`, env var for TheBump base URL |
+| Tier 0–2 processors | `tiers/` | EXISTING — no change | Classification is source-agnostic; RawPost flows through unchanged |
+| dedup, queue, validation | `dedup/`, `queue/`, `validation/` | EXISTING — no change | All downstream of ingestion; source type is invisible to them |
+| `sources` DB table | `packages/db/src/schema.sql` | EXISTING — no change | `type` column already accepts any string; TheBump rows use `type='bump'` |
+| `@repo/db` types | `packages/db/src/types.ts` | EXISTING — no change | `Source` type already generic; no new columns needed |
+
+---
+
+## Recommended Project Structure
+
 ```
 apps/worker/src/
-  ingestion/         # SourceAdapter implementations
-  tiers/             # tier0.ts, tier1.ts, tier2.ts
-  dedup/             # url-hash.ts, embedding-dedup.ts
-  queue/             # pgmq consumer/producer wrappers
-  validation/        # recheck cron handler
-  index.ts           # bootstrap: start consumers + ingestion loop
+  ingestion/
+    source-adapter.ts          # EXISTING — SourceAdapter interface + RawPost type
+    reddit-adapter.ts          # EXISTING — RedditAdapter (no changes)
+    base-forum-adapter.ts      # NEW — abstract base for HTTP/Cheerio adapters
+    thebump-adapter.ts         # NEW — TheBumpAdapter implements SourceAdapter
+    scraping-utils.ts          # NEW — shared fetch, retry, redirect-follow helpers
+    ingest.ts                  # MODIFIED — adapter factory, source-type-agnostic loop
+  tiers/                       # EXISTING — no changes
+  dedup/                       # EXISTING — no changes
+  queue/                       # EXISTING — no changes
+  validation/                  # EXISTING — no changes
+  config.ts                    # MODIFIED — TheBump env + polling constants
+  index.ts                     # MODIFIED — rename Reddit loop to generic ingestion loop
+  logger.ts                    # EXISTING — no changes
 ```
 
-### `apps/dashboard` — Next.js 14 App Router (Vercel)
+No new packages. No new DB tables. No dashboard changes.
 
-Read-heavy UI. Reads from `offers`, `posts`, `human_review_queue`, `ai_calls`, `sources`. Only writes back for human review actions (approve/reject queue items) and keyword suggestions.
+### Structure Rationale
 
-**Responsibilities:**
-- Supabase Auth gate (email allowlist)
-- Offer list with status, source link, last verified date
-- Human review queue: display flagged Tier 2 items, accept/reject
-- AI call log viewer (cost, latency, prompt version)
-- Keyword suggestion surface (does NOT auto-apply — human decides)
+**`base-forum-adapter.ts` as abstract class (not interface):** TheBump scraping needs concrete shared behavior — `fetchWithRetry`, Cheerio parsing wiring, `shouldSkipPost` guards (spam, deleted, too-short body). An abstract class lets `TheBumpAdapter` inherit this behavior without duplicating it, while `RedditAdapter` keeps using snoowrap and ignores the base class entirely (it implements `SourceAdapter` directly as it does today).
 
-**Does NOT own:**
-- Any pipeline logic
-- Direct Voyage or Anthropic API calls
-- pgmq producers/consumers
+**`scraping-utils.ts` as a separate module:** `fetchWithRetry`, redirect-following, and User-Agent management are pure utilities with no adapter state. Extracting them makes both `BaseForumAdapter` and future adapters independently testable. The existing dedup module already uses a similar redirect-follow pattern in `url-hash.ts` — `scraping-utils.ts` does NOT duplicate that; it focuses on page-fetching concerns, not URL normalization.
 
-**Internal layout:**
-```
-apps/dashboard/
-  app/
-    (auth)/         # login page
-    offers/         # offer list + detail
-    review/         # human review queue
-    ai-calls/       # cost/latency log
-  components/
-  lib/
-    supabase.ts     # browser + server client helpers
-```
+**`thebump-adapter.ts` as a leaf adapter:** TheBump has two subforums to scan (freebies + deals), paginated thread lists, and per-thread post scraping. All TheBump-specific CSS selectors, URL construction, and pagination logic live here. Nothing from TheBump leaks into `ingest.ts` or the pipeline.
 
-### `packages/db` — Shared types, schema, client (`@repo/db`)
-
-Single source of truth for database types and the Supabase client factory. Both `worker` and `dashboard` import from here.
-
-**Responsibilities:**
-- `schema.sql` — canonical DDL (tables, indexes, extensions)
-- `types.ts` — TypeScript types generated from Supabase schema (or hand-written until codegen is wired)
-- `client.ts` — exports `createClient()` for server-side use and `createBrowserClient()` for dashboard
-- Re-exports: `Database`, `Post`, `Offer`, `Source`, `AiCall`, `HumanReviewItem`
-
-**Rule:** No application logic here. Pure data layer.
+**`ingest.ts` modification (not rewrite):** The existing `fetchActiveSources` + `runIngestionCycle` structure is kept. Two targeted changes: (1) remove the `.eq('type', 'reddit')` filter so all source types are fetched, (2) replace the inline `createRedditAdapter(source.identifier)` call with a `createAdapterForSource(source)` factory that switches on `source.type`. The per-post upsert + Tier 0 + enqueue logic is unchanged.
 
 ---
 
-## 2. Data Flow
+## Architectural Patterns
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              WORKER (Railway)                               │
-│                                                                             │
-│  ┌──────────────┐    ┌─────────────────────────────────────────────────┐   │
-│  │  Ingestion   │    │                   Pipeline                       │   │
-│  │  loop        │    │                                                  │   │
-│  │  (snoowrap)  │    │  ┌──────────┐   ┌──────────┐   ┌────────────┐  │   │
-│  │              │───▶│  │  Tier 0  │──▶│  Tier 1  │──▶│   Tier 2   │  │   │
-│  │  polls every │    │  │ keyword  │   │  Haiku   │   │   Sonnet   │  │   │
-│  │  ~5 min      │    │  │ filter   │   │ classify │   │  extract   │  │   │
-│  └──────┬───────┘    │  └────┬─────┘   └────┬─────┘   └─────┬──────┘  │   │
-│         │            │       │ fail          │ fail          │          │   │
-│         │            │       │               │               │          │   │
-│         │            │       ▼               ▼               ▼          │   │
-│         │            │  rejected        rejected        confidence      │   │
-│         │            │  (stored)        (stored)        < 0.7 →        │   │
-│         │            │                                human_review_     │   │
-│         │            │                                queue            │   │
-│         │            └──────────────────────────────────────────────┘  │   │
-│         │                                                    │          │   │
-│         ▼                                                    ▼          │   │
-│  ┌─────────────┐                                    ┌──────────────┐   │   │
-│  │   posts     │                                    │    Dedup     │   │   │
-│  │   table     │                                    │ URL hash +   │   │   │
-│  │  (Supabase) │                                    │ Voyage embed │   │   │
-│  └─────────────┘                                    └──────┬───────┘   │   │
-│                                                             │           │   │
-│                                              match ◄────────┴────► new  │   │
-│                                                │                    │   │   │
-│                                                ▼                    ▼   │   │
-│                                         link to existing       offers   │   │
-│                                         offer via              table    │   │
-│                                         post_offers                     │   │
-│                                                                         │   │
-│  ┌──────────────────────────────────────────────────────────────────┐  │   │
-│  │  Validation cron (pg_cron daily + per-offer weekly)              │  │   │
-│  │  → fetches URL → checks liveness → checks dead signals          │  │   │
-│  │  → updates offers.status + verification_log                     │  │   │
-│  └──────────────────────────────────────────────────────────────────┘  │   │
-└─────────────────────────────────────────────────────────────────────────────┘
+### Adapter pattern via `SourceAdapter` interface
 
-Queue flow (pgmq):
-  Tier 0 pass  →  enqueue tier1_queue
-  Tier 1 pass  →  enqueue tier2_queue
-  Tier 2 done  →  archive message (prevents re-delivery)
-
-┌─────────────────────────────────────────────────────────┐
-│                  DASHBOARD (Vercel)                     │
-│                                                         │
-│  Supabase Auth → reads offers, posts, human_review_     │
-│  queue, ai_calls → human reviewer approves/rejects     │
-│  flagged items                                          │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Queue message lifecycle
-
-```
-enqueue(tier1_queue, { post_id })
-  └─▶ consumer reads message (visibility_timeout = 30s)
-        ├─ success → archive(msg_id)          ← must be explicit
-        ├─ soft fail → nack / let timeout     ← re-delivers up to max_delivery_count
-        └─ hard fail → archive + write error  ← log to ai_calls, mark post failed
-```
-
----
-
-## 3. Database Schema
-
-### Extensions (one-time setup)
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;     -- pgvector (1024-dim embeddings)
-CREATE EXTENSION IF NOT EXISTS pgmq;       -- Postgres-native queue
-CREATE EXTENSION IF NOT EXISTS pg_cron;    -- scheduled validation jobs
-```
-
-### Tables
-
-#### `sources`
-Tracks ingestion sources (subreddits, Discourse instances).
-```sql
-CREATE TABLE sources (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  type          text NOT NULL,                   -- 'reddit' | 'discourse'
-  identifier    text NOT NULL UNIQUE,            -- subreddit name or base URL
-  config        jsonb NOT NULL DEFAULT '{}',     -- polling config, auth config
-  last_polled_at timestamptz,
-  created_at    timestamptz NOT NULL DEFAULT now()
-);
-```
-
-#### `posts`
-Raw scraped content. One row per unique post/comment from a source.
-```sql
-CREATE TABLE posts (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  source_id       uuid NOT NULL REFERENCES sources(id),
-  external_id     text NOT NULL,                 -- Reddit post/comment ID
-  url             text NOT NULL,
-  title           text,
-  body            text,
-  author          text,
-  posted_at       timestamptz,
-  tier0_passed    boolean,                       -- null = not yet run
-  tier1_result    jsonb,                         -- {decision, confidence, reason, prompt_version}
-  tier2_result    jsonb,                         -- structured offer extraction
-  pipeline_status text NOT NULL DEFAULT 'pending',
-    -- 'pending' | 'tier0_rejected' | 'tier1_rejected' | 'tier2_done'
-    -- | 'dedup_matched' | 'published' | 'review_queued' | 'error'
-  error_detail    text,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-
-  CONSTRAINT posts_source_external_unique UNIQUE (source_id, external_id)
-);
-
-CREATE INDEX posts_pipeline_status_idx ON posts(pipeline_status);
-CREATE INDEX posts_source_id_idx ON posts(source_id);
-```
-
-#### `offers`
-Deduplicated, validated free offers. Populated by Tier 2 + dedup.
-```sql
-CREATE TABLE offers (
-  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  destination_url      text NOT NULL,
-  destination_url_hash text NOT NULL,            -- sha256 of normalized URL
-  title                text NOT NULL,
-  description          text,
-  brand                text,
-  category             text,                     -- 'baby_gear' | 'formula' | etc.
-  offer_type           text,                     -- 'sample' | 'full_product' | etc.
-  shipping_cost        numeric,                  -- must be 0 for published
-  restrictions         text[],
-  embedding            vector(1024),             -- Voyage AI embedding
-  status               text NOT NULL DEFAULT 'active',
-    -- 'active' | 'expired' | 'unverified' | 'review_pending'
-  last_verified_at     timestamptz,
-  next_check_at        timestamptz,
-  extraction_confidence numeric,                 -- Tier 2 confidence score
-  created_at           timestamptz NOT NULL DEFAULT now(),
-  updated_at           timestamptz NOT NULL DEFAULT now()
-);
-
--- Hash lookup for URL dedup (O(1) exact match)
-CREATE INDEX offers_url_hash_idx ON offers(destination_url_hash);
-
--- ANN search for semantic dedup (cosine similarity ≥ 0.85)
--- lists=100 is a reasonable starting point; tune after data volume grows
-CREATE INDEX offers_embedding_ivfflat_idx
-  ON offers USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
-
--- Validation cron query — only active offers with due check
-CREATE INDEX offers_next_check_active_idx
-  ON offers(next_check_at)
-  WHERE status = 'active';
-```
-
-#### `post_offers` (join table)
-Many posts can map to one offer (duplicates share an offer).
-```sql
-CREATE TABLE post_offers (
-  post_id    uuid NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  offer_id   uuid NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-
-  PRIMARY KEY (post_id, offer_id)
-);
-
-CREATE INDEX post_offers_offer_id_idx ON post_offers(offer_id);
-```
-
-#### `verification_log`
-Audit trail for every validation check.
-```sql
-CREATE TABLE verification_log (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  offer_id     uuid NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
-  checked_at   timestamptz NOT NULL DEFAULT now(),
-  http_status  integer,
-  is_live      boolean NOT NULL,
-  dead_signals text[],                           -- detected expiry phrases
-  raw_response text                              -- truncated page text for debug
-);
-
-CREATE INDEX verification_log_offer_id_idx ON verification_log(offer_id);
-```
-
-#### `human_review_queue`
-Holds Tier 2 extractions with confidence < 0.7.
-```sql
-CREATE TABLE human_review_queue (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id         uuid NOT NULL REFERENCES posts(id),
-  tier2_result    jsonb NOT NULL,
-  confidence      numeric NOT NULL,
-  reviewer_id     uuid,                          -- Supabase auth uid
-  decision        text,                          -- 'approved' | 'rejected'
-  review_note     text,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  reviewed_at     timestamptz
-);
-
-CREATE INDEX human_review_queue_unreviewed_idx
-  ON human_review_queue(created_at)
-  WHERE decision IS NULL;
-```
-
-#### `ai_calls`
-Immutable log of every Tier 1 and Tier 2 AI call.
-```sql
-CREATE TABLE ai_calls (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id         uuid REFERENCES posts(id),
-  tier            integer NOT NULL,              -- 1 or 2
-  model           text NOT NULL,                 -- 'claude-haiku-...' | 'claude-sonnet-...'
-  prompt_version  text NOT NULL,                 -- git commit hash of prompt file
-  input_tokens    integer NOT NULL,
-  output_tokens   integer NOT NULL,
-  cost_usd        numeric(10,6) NOT NULL,
-  latency_ms      integer NOT NULL,
-  request_payload jsonb,                         -- truncated for cost analysis
-  response_payload jsonb,
-  error           text,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX ai_calls_post_id_idx ON ai_calls(post_id);
-CREATE INDEX ai_calls_tier_idx ON ai_calls(tier);
-CREATE INDEX ai_calls_created_at_idx ON ai_calls(created_at DESC);
-```
-
-### pgmq queues (created via SQL, not DDL migrations)
-```sql
-SELECT pgmq.create('tier1_queue');
-SELECT pgmq.create('tier2_queue');
-```
-
----
-
-## 4. Queue Patterns
-
-### Producer pattern (worker — after Tier 0 pass)
 ```typescript
-// In worker/src/queue/producer.ts
-export async function enqueueTier1(postId: string): Promise<void> {
-  await supabase.rpc('pgmq_send', {
-    queue_name: 'tier1_queue',
-    msg: { post_id: postId },
-  });
+// source-adapter.ts — already exists, no change
+export interface SourceAdapter {
+  fetchNewPosts(since: Date): Promise<RawPost[]>;
 }
 ```
 
-### Consumer pattern (worker — Tier 1 loop)
+Both `RedditAdapter` and `TheBumpAdapter` implement this interface. `ingest.ts` only calls `fetchNewPosts` — it has zero knowledge of scraping mechanics.
+
+### Abstract base class for HTTP/Cheerio adapters
+
 ```typescript
-// In worker/src/queue/consumer.ts
-export async function runTier1Consumer(): Promise<void> {
-  while (true) {
-    const messages = await supabase.rpc('pgmq_read', {
-      queue_name: 'tier1_queue',
-      vt: 30,       // visibility timeout in seconds
-      qty: 5,       // batch size
-    });
+// base-forum-adapter.ts — NEW
+export abstract class BaseForumAdapter implements SourceAdapter {
+  abstract fetchNewPosts(since: Date): Promise<RawPost[]>;
 
-    if (!messages.data?.length) {
-      await sleep(2000);
-      continue;
-    }
+  protected async fetchPage(url: string): Promise<CheerioAPI> {
+    // Uses scraping-utils.fetchWithRetry internally
+  }
 
-    for (const msg of messages.data) {
-      try {
-        await processTier1(msg.message.post_id);
-        // CRITICAL: must archive or message re-delivers after vt expires
-        await supabase.rpc('pgmq_archive', {
-          queue_name: 'tier1_queue',
-          msg_id: msg.msg_id,
-        });
-      } catch (err) {
-        // Log error, do NOT archive — allows up to max_delivery_count retries
-        await logError('tier1', msg.message.post_id, err);
-      }
-    }
+  protected shouldSkipPost(body: string | null): boolean {
+    // Too short, deleted marker, spam signals
   }
 }
 ```
 
-### Error handling strategy
+`TheBumpAdapter extends BaseForumAdapter`. `RedditAdapter` does NOT extend it — Reddit adapter uses snoowrap, not Cheerio.
 
-| Scenario | Handling |
-|---|---|
-| Transient network/API error | Do not archive — message re-delivers after `vt` (30s default) |
-| Anthropic API 5xx | Same as above — snoowrap-style backoff, max 3 retries |
-| Tier 2 confidence < 0.7 | Archive message + insert into `human_review_queue` |
-| Parsing / schema error | Archive message + mark post `pipeline_status = 'error'` + log |
-| pgmq `max_delivery_count` exceeded | Message moves to dead-letter; alert via Axiom |
+### Config-driven source registration (DB-side)
 
-### Retry visibility timeout tuning
+Sources are registered as rows in the `sources` table, not hardcoded in TypeScript. The `config` JSONB column on `sources` carries adapter-specific config (e.g., subforum URLs, max pages per poll):
 
-- Tier 1 (Haiku): vt = 30s — fast calls, aggressive retry acceptable
-- Tier 2 (Sonnet): vt = 60s — longer calls, avoid duplicate concurrent processing
-- Batch size: start at 5, tune based on Railway instance memory
-
-### Dead-letter handling
-pgmq does not automatically dead-letter — messages that exceed `max_delivery_count` stay visible. Implement a separate drain job:
 ```sql
--- Periodically query for messages exceeding threshold
-SELECT * FROM pgmq.q_tier1_queue WHERE read_ct > 5;
+-- Example TheBump source row
+INSERT INTO sources (type, identifier, config) VALUES (
+  'bump',
+  'thebump-freebies',
+  '{
+    "base_url": "https://community.thebump.com",
+    "subforum_paths": ["/freebies", "/deals-and-coupons"],
+    "max_pages_per_poll": 3
+  }'
+);
 ```
-Archive these and write to `posts.pipeline_status = 'error'` with `error_detail`.
+
+The adapter factory in `ingest.ts` reads `source.config` and passes it to the adapter constructor. New adapters in future milestones only need a new DB row + a new adapter class — no code changes to `ingest.ts`.
+
+### Factory function in `ingest.ts`
+
+```typescript
+// ingest.ts — MODIFIED
+function createAdapterForSource(source: Source): SourceAdapter {
+  switch (source.type) {
+    case 'reddit':
+      return createRedditAdapter(source.identifier);
+    case 'bump':
+      return createTheBumpAdapter(source.identifier, source.config);
+    default:
+      throw new Error(`Unknown source type: ${source.type}`);
+  }
+}
+```
+
+### Scraping utility pattern
+
+```typescript
+// scraping-utils.ts — NEW
+export async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = 3,
+): Promise<Response> { ... }
+
+// Rate-limit sleep between TheBump page requests (no OAuth backoff like Reddit)
+export async function respectfulDelay(ms = 1500): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+```
+
+These are stateless pure functions — no class, no singleton.
 
 ---
 
-## 5. Build Order
+## Data Flow
 
-Build in dependency order — each phase unblocks the next.
+TheBump posts flow through the existing pipeline identically to Reddit posts. The source type becomes invisible after the `RawPost[]` boundary:
 
-### Phase 1: Foundation (must be first)
-**`packages/db`** — everything else imports from here.
-- `schema.sql` with all tables, indexes, extensions
-- `types.ts` mirroring the schema
-- `client.ts` exporting `createClient()`
-- Deploy schema to Supabase; create pgmq queues
+```
+TheBumpAdapter.fetchNewPosts(since)
+  └─ scrapes subforum thread list pages (Cheerio)
+  └─ for each thread newer than `since`:
+       └─ scrapes thread page (Cheerio)
+       └─ maps each post/reply → RawPost
 
-### Phase 2: Core pipeline (sequential, each depends on prior)
-**`apps/worker` — Ingestion + Tier 0**
-- `SourceAdapter` interface
-- Reddit adapter (snoowrap)
-- Tier 0 keyword filter (inline, no queue)
-- Writes `posts` table, enqueues to `tier1_queue`
+ingest.ts: runIngestionCycle()
+  └─ for each RawPost:
+       └─ upsert to posts table (UNIQUE source_id, external_id) ← same as Reddit
+       └─ Tier 0 keyword filter on title + body              ← same as Reddit
+       └─ if passes: enqueue to tier1_queue                  ← same as Reddit
+       └─ update posts.pipeline_status                       ← same as Reddit
 
-**`apps/worker` — Tier 1**
-- pgmq consumer scaffolding (read/archive pattern)
-- Haiku classifier (tool use, `@anthropic-ai/sdk` direct)
-- Logs to `ai_calls`, stores result in `posts.tier1_result`
-- Enqueues Tier 1 passes to `tier2_queue`
+Tier 1 consumer (Haiku)  ← unchanged, processes post_id off queue
+Tier 2 consumer (Sonnet) ← unchanged, processes post_id off queue
+Dedup (URL hash + Voyage) ← unchanged
+Validation cron           ← unchanged
+Dashboard                 ← unchanged
+```
 
-**`apps/worker` — Tier 2 + Dedup**
-- Sonnet extractor (tool use / structured output)
-- Exclusion checks inline
-- URL normalization + hash dedup
-- Voyage embedding + pgvector cosine dedup
-- Writes `offers` and `post_offers`
-- Routes low-confidence to `human_review_queue`
+Key invariant: `posts.source_id` links back to the TheBump source row, but no downstream component queries by `source_id`. The pipeline is source-blind from Tier 0 onward.
 
-### Phase 3: Validation
-**`apps/worker` — Validation cron**
-- pg_cron triggers worker endpoint (or worker polls `next_check_at`)
-- URL liveness fetch + dead signal detection
-- Updates `offers.status` + inserts `verification_log`
+### `external_id` construction for TheBump
 
-### Phase 4: Dashboard
-**`apps/dashboard`**
-- Supabase Auth (email allowlist gate)
-- Offer list page (read from `offers` + `post_offers`)
-- Human review queue page (read/write `human_review_queue`)
-- AI calls log page
-- Keyword suggestion surface (read-only, no writes to Tier 0 list)
+TheBump threads and posts have numeric IDs in their URLs (e.g., `https://community.thebump.com/t/thread-title/123456/7`). Use the thread ID + post number as the `external_id` (e.g., `"t123456-p7"`). This guarantees UNIQUE(source_id, external_id) uniqueness without colliding with Reddit's alphanumeric IDs.
 
-Dashboard can be built in parallel with Phase 3 once the DB schema is stable (after Phase 2 first pass).
+### `posted_at` for TheBump
 
-### Phase 5: Evals + hardening
-- `evals/labeled-posts.json` + `evals/run-eval.ts`
-- Prompt versioning wired to git hash
-- Axiom structured logging
-- Railway + Vercel environment wiring
+Parse the timestamp from the `<time>` element's `datetime` attribute in each post. Fall back to `null` if absent — the ingestion loop will still process the post; `since`-based filtering is skipped for null timestamps (treat as "could be new").
 
 ---
 
-## Key Risks and Mitigations
+## Integration Points
 
-| Risk | Mitigation |
-|---|---|
-| pgmq message re-delivery causing duplicate AI calls | Always check `posts.pipeline_status` before processing; idempotent tier handlers |
-| ivfflat index requires `ANALYZE` after bulk insert | Run `ANALYZE offers` after first batch; document in schema.sql comments |
-| Voyage API rate limits during bulk backfill | Batch embedding calls; add per-request latency tracking in `ai_calls` |
-| snoowrap incomplete types causing runtime errors | Wrap all Reddit API calls in try/catch; `@ts-ignore` with comments |
-| Supabase pgvector `CREATE EXTENSION vector` not done | Add to schema.sql preamble with `IF NOT EXISTS` guard |
-| Redirect-following before URL hashing adds latency | Run redirect follow async, cache in `posts` metadata before hashing |
+| Integration Point | Existing Code | What Changes |
+|-------------------|---------------|--------------|
+| `SourceAdapter` interface | `ingestion/source-adapter.ts` | No change. TheBumpAdapter implements it. |
+| `fetchActiveSources()` | `ingestion/ingest.ts` line 13 | Remove `.eq('type', 'reddit')` filter — fetch all types. |
+| `runIngestionCycle()` | `ingestion/ingest.ts` line 36 | Replace inline `createRedditAdapter` with `createAdapterForSource(source)` factory. Remove `redditSources` filter at line 38. |
+| Worker entry point | `apps/worker/src/index.ts` | Rename `runRedditIngestionLoop` → `runIngestionLoop`. No other changes. |
+| `sources` DB table | `packages/db/src/schema.sql` | No schema change. Insert TheBump rows with `type='bump'`. |
+| `config.ts` | `apps/worker/src/config.ts` | Add `SCRAPING_REQUEST_TIMEOUT_MS`, optional `THEBUMP_BASE_URL` env var override. |
+| Tier 0–2 pipeline | `tiers/` | No changes. `post_id` UUID is source-agnostic. |
+| Dedup | `dedup/` | No changes. |
+| Validation | `validation/` | No changes. `offers.destination_url` from TheBump flows through identically. |
+| Dashboard | `apps/dashboard/` | No changes needed for v1.1. Source column on offer list could show "TheBump" vs "Reddit" in a future milestone. |
+
+---
+
+## Anti-Patterns
+
+**Do NOT add a TheBump ingestion loop in `index.ts` alongside the Reddit loop.** The existing `runIngestionLoop` handles all sources by reading the `sources` table. Adding a parallel `runTheBumpIngestionLoop` would duplicate polling logic, split `last_polled_at` updates, and make it impossible to add source 3 without another loop.
+
+**Do NOT hardcode TheBump URLs in TypeScript.** Subforum paths belong in `sources.config` JSONB, not in `thebump-adapter.ts` constants. The adapter reads them from the config passed by `ingest.ts`. This is what makes the infrastructure "config-driven."
+
+**Do NOT use Playwright in the TheBump adapter for v1.1.** TheBump's community forum renders server-side HTML — Cheerio is sufficient. Playwright is reserved for the validation cron's JS-heavy offer pages (as noted in PITFALLS.md section 8.2). Using Playwright in the hot ingestion path adds 2–5 second latency per page.
+
+**Do NOT query `source_id` in Tier 1 or Tier 2 processors.** These tiers receive only a `post_id` from the queue. Reading source metadata inside Tier 1/2 would couple classification logic to ingestion concerns. If source-specific prompt adjustments are ever needed (e.g., different prompts for forum vs Reddit), pass a `source_type` field in the pgmq message payload — don't reach back to the `sources` table inside the tier processor.
+
+**Do NOT skip the Tier 0 keyword filter for TheBump posts.** TheBump forums contain deal posts, coupon posts, and questions — most will not pass Tier 0. TheBump has lower signal-to-noise than a dedicated freebies subreddit. Bypassing Tier 0 would send significant Haiku traffic for posts that fail at keyword filtering. The filter runs inline in `runIngestionCycle` for all source types already.
+
+**Do NOT extend `RedditAdapter` for TheBump.** `RedditAdapter` is tightly coupled to snoowrap and Reddit API shapes. TheBump needs HTTP+Cheerio. Shared adapter behavior belongs in `BaseForumAdapter` — a separate abstract class that Reddit never inherits from.
+
+**Do NOT reuse the Reddit `shouldSkipAuthor` function for TheBump.** That function checks for Reddit-specific patterns (bot name patterns, `[deleted]`, `[removed]`, `distinguished` field). TheBump has different spam/delete indicators — implement `shouldSkipPost` on `BaseForumAdapter` with TheBump-appropriate signals (deleted post markers, extremely short body, staff/moderator badges).
+
+---
+
+## Build Order
+
+Dependencies flow downward — each step unblocks the next.
+
+**Step 1: `scraping-utils.ts`** (no dependencies in worker)
+- `fetchWithRetry(url, options, maxRetries)` using native `fetch`
+- `respectfulDelay(ms)` for rate limiting between page requests
+- User-Agent string constant (identify the bot honestly)
+- Unit testable in isolation
+
+**Step 2: `base-forum-adapter.ts`** (depends on `scraping-utils.ts`)
+- Abstract class implementing `SourceAdapter`
+- `protected fetchPage(url): Promise<CheerioAPI>` — wraps scraping-utils
+- `protected shouldSkipPost(body: string | null): boolean` — shared guard
+- Vitest unit tests with mocked `fetchWithRetry`
+
+**Step 3: `thebump-adapter.ts`** (depends on `base-forum-adapter.ts`)
+- `TheBumpAdapter extends BaseForumAdapter`
+- `fetchNewPosts(since)`: scrape subforum thread list → per-thread posts
+- Map scraped HTML → `RawPost[]` with correct `external_id` construction
+- Vitest unit tests with Cheerio fixture HTML snapshots (record real pages once, test deterministically)
+
+**Step 4: `ingest.ts` modifications** (depends on `thebump-adapter.ts`)
+- Remove `.eq('type', 'reddit')` from `fetchActiveSources`
+- Add `createAdapterForSource(source)` factory
+- Remove `redditSources` filtering from `runIngestionCycle`
+- Existing tests still pass; add integration test for TheBump source type dispatch
+
+**Step 5: `config.ts` additions** (independent, can be done alongside Step 1)
+- `SCRAPING_REQUEST_TIMEOUT_MS = 10_000`
+- `getEnvOrThrow('THEBUMP_BASE_URL')` only if you want to override the base URL in tests; otherwise hardcode as a constant in `thebump-adapter.ts`
+
+**Step 6: `index.ts` rename** (depends on Step 4)
+- Rename `runRedditIngestionLoop` → `runIngestionLoop` — one-line change
+
+**Step 7: DB source row insertion** (independent — can be done anytime)
+- Insert TheBump source rows into `sources` table via Supabase SQL editor
+- No schema migration needed
+
+**Step 8: End-to-end smoke test**
+- Run worker in dev mode, verify TheBump posts appear in `posts` table
+- Verify `pipeline_status` progresses through `tier0_passed` / `tier0_rejected`
+- Check Tier 1 queue receives TheBump post IDs
+
+---
+
+## Sources
+
+- `/apps/worker/src/ingestion/source-adapter.ts` — existing `SourceAdapter` interface and `RawPost` type
+- `/apps/worker/src/ingestion/reddit-adapter.ts` — existing `RedditAdapter` implementation pattern
+- `/apps/worker/src/ingestion/ingest.ts` — existing `fetchActiveSources` + `runIngestionCycle` (hardcoded Reddit filter at line 14 and 38)
+- `/apps/worker/src/index.ts` — existing 4-loop `Promise.all` structure
+- `/apps/worker/src/config.ts` — existing env validation and constants
+- `/packages/db/src/schema.sql` — `sources.type` column, `sources.config` JSONB, `UNIQUE(source_id, external_id)` constraint
+- `/packages/db/src/types.ts` — `Source` type (already generic — no new columns needed)
+- `/.planning/PROJECT.md` — v1.1 milestone goals: TheBump adapter + shared adapter infrastructure
+- `/.planning/research/PITFALLS.md` — sections 5 (URL normalization), 8.2 (Playwright only for validation)
+- `/.planning/research/STACK.md` — Cheerio 1.2.0 already in stack; `p-retry` and `p-limit` available

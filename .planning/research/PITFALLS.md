@@ -1,416 +1,344 @@
-# Pipeline Pitfalls — Free Offers Monitor
+# Pitfalls Research
 
-Domain-specific traps for a Reddit/forum monitoring pipeline with AI classification, deduplication via embeddings, and Postgres-native queuing. Generic advice excluded; every item maps to a concrete failure mode in this stack.
-
----
-
-## 1. snoowrap
-
-### 1.1 Incomplete TypeScript types
-
-**Warning signs**
-- TypeScript errors on `.comments`, `.replies`, `.body`, `.author`, `listing.fetchMore()` return shapes
-- `as any` casts proliferating in ingestion code
-- Build breaks on minor snoowrap version bumps that change the partial types
-
-**Prevention strategy**
-- Declare a `RawRedditPost` and `RawRedditComment` type in `@repo/db/src/types.ts` that owns the exact fields the pipeline uses; cast once at the adapter boundary
-- Use `// @ts-ignore` only at the snoowrap call site, never deep inside business logic
-- Pin snoowrap to an exact version (`"snoowrap": "1.23.0"`) — do not use `^` — until types stabilize
-
-**Build phase**: Phase 1 (Reddit ingestion adapter setup)
+**Domain:** Forum scraping adapter infrastructure — adding TheBump HTML adapter and shared adapter abstraction to existing Reddit/API pipeline
+**Researched:** 2026-04-21
+**Confidence:** HIGH
 
 ---
 
-### 1.2 OAuth token refresh silently failing
+## Critical Pitfalls
 
-**Warning signs**
-- `401 Unauthorized` appearing mid-run, often after ~1 hour
-- snoowrap continues without throwing; subsequent requests return empty listings
-- Logs show "fetched 0 posts" rather than an error
+### Pitfall 1: TheBump DOM Structure Silently Changes Between Deploys
 
-**Prevention strategy**
-- Construct the snoowrap client with `permanent: true` on the OAuth token so it auto-refreshes; verify the `refresh_token` is stored in Supabase Vault, not just an access token
-- Add a health-check call (`r.getMe()`) at worker startup to confirm credentials before queuing work
-- Log token refresh events explicitly — snoowrap fires a `tokenRefreshed` event; hook into it via `r.on('tokenRefreshed', ...)`
+**What goes wrong:** Cheerio selectors hardcoded against TheBump's current HTML markup break silently the moment TheBump ships a CSS/template update. The adapter continues returning `RawPost` objects with `null` title, `null` body, and garbage `external_id` values — no exception is thrown. Posts get upserted to the DB, pass Tier 0 (empty string fails keyword filter, so most are dropped — but any keyword-free posts with `title` accidentally matching slip through), and the pipeline looks healthy in logs.
 
-**Build phase**: Phase 1 (Reddit ingestion adapter setup)
+**Why it happens:** Cheerio scraping operates against raw HTML strings with no schema contract. TheBump is a React/Next.js forum rendered server-side; its class names follow a convention like `PostListItem_title__3xQzM` where the hash suffix is generated at build time. Any deployment on TheBump's side regenerates these hashes.
 
----
+**How to avoid:**
+- Target semantic HTML attributes over generated class names: prefer `[data-testid="post-title"]`, `<h1>`, `<article>`, `<time datetime="">` over `div.PostListItem_title__3xQzM`
+- After selecting an element, assert it is non-null and non-empty before returning: throw a typed `ScrapeError` with the selector name rather than silently returning `null`
+- Add a post-fetch assertion: if `posts.length === 0` from a page that should have posts (the freebies subforum is always non-empty), emit `thebump_scrape_zero_results` log at `warn` level, not `info`
+- Write a dedicated selector smoke-test that runs weekly against the live site in CI — separate from unit tests
 
-### 1.3 Comment tree traversal depth and MoreComments objects
+**Warning signs:**
+- All TheBump posts have `title: null` or `body: null` in the DB
+- `tier0_passed` is consistently `false` for TheBump posts while Reddit posts pass at normal rates
+- `source.last_polled_at` updates but `ingested` count is 0
 
-**Warning signs**
-- `comments` array contains `MoreComments` objects instead of `Comment` objects — iterating them as strings/bodies silently yields `undefined`
-- Top-level comment replies are missing because `fetchMore` was never called
-- Bot and AutoModerator comments slipping through because the traversal hits them before the depth check
+**Phase to address:** Phase 1 (TheBump adapter) — build in assertions from day one, not as a follow-up hardening pass
 
-**Prevention strategy**
-- Call `submission.comments.fetchAll()` only once per post, then walk the flat list — do not recursively descend into `.replies` without first checking `instanceof MoreComments`
-- Enforce the "one reply deep" rule in the traversal: collect `submission.comments` (top-level) and `comment.replies` (one level) then stop; do not recurse further
-- Filter AutoModerator and known bot account names (`AutoModerator`, accounts ending in `Bot`, `_bot`, `_official`) before any further processing
-- Check `comment.body === '[deleted]'` and `comment.author?.name === '[deleted]'` — treat both as skip-and-log, not as errors
-
-**Build phase**: Phase 1 (Reddit ingestion adapter setup)
 
 ---
 
-### 1.4 Rate limit bursting and backoff logging
+### Pitfall 2: Breaking the Existing Reddit Adapter During SourceAdapter Refactor
 
-**Warning signs**
-- snoowrap silently delays requests without any log output — pipeline appears hung
-- Fetching comments on many posts in rapid succession burns through the 100 req/min limit quickly (each `fetchMore` call = 1 request)
-- Railway free-tier timeout kills the worker mid-backoff
+**What goes wrong:** Extracting shared adapter infrastructure requires touching `source-adapter.ts`, `ingest.ts`, and `reddit-adapter.ts`. Any change to the `SourceAdapter` interface, `RawPost` type, or the `fetchActiveSources` / `runIngestionCycle` functions can silently break the Reddit adapter. TypeScript catches interface shape mismatches but not behavioral regressions (e.g., the `since: Date` semantics changing, the `source.identifier` field being used differently).
 
-**Prevention strategy**
-- Instrument snoowrap's `ratelimitExpiry` and `requestsThisMinute` properties after each call; emit a structured log (`{ event: 'reddit_ratelimit', remaining, reset_at }`) to Axiom
-- Batch post-comment fetches in groups of 20 with an explicit 15-second pause between groups to stay well under 100 req/min even during comment fetching
-- Keep the worker's Railway health-check endpoint responding during backoff to avoid premature restarts
+**Why it happens:** The current `ingest.ts` is tightly coupled to Reddit: `fetchActiveSources` queries `WHERE type = 'reddit'`, `runIngestionCycle` calls `createRedditAdapter(source.identifier)` directly, and the loop is named `runRedditIngestionLoop` in `index.ts`. Any refactor that adds a TheBump branch must touch all three files simultaneously — high surface area for regression.
 
-**Build phase**: Phase 1 (Reddit ingestion adapter setup), revisit in Phase 5 (production hardening)
+**How to avoid:**
+- The `SourceAdapter` interface (`fetchNewPosts(since: Date): Promise<RawPost[]>`) must remain unchanged — do not add required parameters or change the return type as part of v1.1
+- Extract `fetchActiveSources` to accept a `type` filter param OR make it source-type agnostic (`WHERE type IN ('reddit', 'thebump')`) — test both paths before merging
+- Add a Vitest integration test that creates a `RedditAdapter` mock and runs the full ingestion cycle path with a real DB client against a test source row — run it before and after the refactor to confirm no regression
+- Keep the `runRedditIngestionLoop` name in `index.ts` or add a `runTheBumpIngestionLoop` alongside it rather than merging them into a single loop prematurely
 
----
+**Warning signs:**
+- Reddit posts stop appearing in the DB after the refactor is merged
+- `ingestion_cycle_start` logs show `source_id` for Reddit sources but `ingestion_cycle_complete` shows `total: 0`
+- TypeScript compiles clean but runtime throws `createRedditAdapter is not a function` (import path changed)
 
-## 2. pgmq
+**Phase to address:** Phase 2 (shared adapter infrastructure) — do the refactor in a separate phase from the TheBump adapter, with a green Reddit test suite as the gate
 
-### 2.1 Messages re-deliver if not archived
-
-**Warning signs**
-- Same post processed by Tier 1 or Tier 2 multiple times — duplicate `ai_calls` rows, duplicate offers
-- Idempotency guards in the processing code masking the real issue (the message keeps coming back)
-- Processing errors cause infinite re-delivery loops if the catch block doesn't archive
-
-**Prevention strategy**
-- Always call `pgmq.archive(queue_name, msg_id)` in a `finally` block, never only in the happy path
-- For error cases, archive to the queue's dead-letter table instead of leaving the message visible: `pgmq.send('tier1_dlq', original_payload)` then `pgmq.archive('tier1', msg_id)`
-- Log `msg_id` in every Tier 1/2 call so duplicate-processing can be detected from logs before it corrupts data
-
-**Build phase**: Phase 2 (Tier 1 pgmq worker), Phase 3 (Tier 2 pgmq worker)
 
 ---
 
-### 2.2 Visibility timeout tuning
+### Pitfall 3: TheBump External ID Instability Causing UNIQUE Constraint Violations or Duplicate Posts
 
-**Warning signs**
-- Tier 2 (Sonnet extraction) takes 8–15 seconds but the visibility timeout is set to the pgmq default (30s) — a slow network hiccup causes the message to become visible again mid-processing
-- Two worker instances both pick up the same message when scaling horizontally
+**What goes wrong:** The `UNIQUE(source_id, external_id)` constraint on the `posts` table is the dedup guard against re-polling the same post. For Reddit, `external_id` is the stable Reddit post/comment ID (e.g., `t3_abc123`). For TheBump, the equivalent is the URL path slug or a numeric thread ID embedded in the URL. If the scraper derives `external_id` from something unstable — a list position, a scraped text string with whitespace, a partial URL that changes on pagination — the same post gets inserted repeatedly or the upsert silently updates a different post.
 
-**Prevention strategy**
-- Set visibility timeout to 120s for Tier 2 (Sonnet can be slow under load) and 30s for Tier 1 (Haiku is fast)
-- Extend visibility mid-processing if needed: call `pgmq.set_vt(queue_name, msg_id, 60)` after a successful AI call but before DB writes
-- Never run more worker instances than you can handle re-delivery for — in v1, a single Railway instance is safer than horizontal scaling without a distributed lock
+**Why it happens:** HTML forums do not expose a stable machine ID in a standard location. The scraper must find and extract it reliably. TheBump community URLs follow the pattern `/community/posts/{slug}-{numeric-id}` — the numeric ID is stable but the slug can change if the post title is edited. Using the full slug as `external_id` means an edited title creates a new post record.
 
-**Build phase**: Phase 2–3 (queue worker setup), revisit in Phase 5
+**How to avoid:**
+- Extract only the numeric suffix from TheBump post URLs as `external_id` — e.g., from `/community/posts/free-diapers-sample-4829183`, use `4829183` — never use the full slug
+- Validate `external_id` format in the adapter before returning `RawPost[]`: assert it matches `/^\d+$/` and is non-empty; throw `ScrapeError` if not
+- Log any `external_id` that does not match the expected format at `warn` level before dropping the post
 
----
+**Warning signs:**
+- The same TheBump thread appears twice in the `posts` table with different `external_id` values after a post title edit
+- Upsert logs show high conflict rates (many `onConflict` hits) without corresponding `tier0_passed` increases
+- `external_id` values in the DB contain whitespace, slashes, or full URL strings
 
-### 2.3 Dead letter queue accumulation
+**Phase to address:** Phase 1 (TheBump adapter) — define and validate the ID extraction rule before writing any other adapter logic
 
-**Warning signs**
-- DLQ table growing silently with no alerting — weeks of failed posts never reviewed
-- A parsing regression routes everything to DLQ; the pipeline looks healthy (no errors) but produces no offers
-
-**Prevention strategy**
-- Add a pg_cron job that counts DLQ depth every 15 minutes and inserts a row into a `pipeline_health` table; expose it on the dashboard
-- Set a hard DLQ size cap: if `tier1_dlq` exceeds 500 rows, send a Slack/email alert before investigating
-- DLQ messages must preserve the original `msg_id`, `enqueued_at`, and `fail_reason` to aid diagnosis
-
-**Build phase**: Phase 4 (monitoring/alerting)
 
 ---
 
-## 3. pgvector
+### Pitfall 4: Pagination Skipping or Infinite Looping
 
-### 3.1 ivfflat vs hnsw index choice
+**What goes wrong:** TheBump forum pages list posts in paginated sets. If the scraper fetches only the first page, it misses older posts from the `since: Date` window. If it follows `Next` page links without a termination condition, it can loop indefinitely (some forums cycle back to page 1 after the last page, or `since` filtering causes all fetched pages to be empty but the "next" link still exists).
 
-**Warning signs**
-- Cosine similarity queries taking 200ms+ on 10k+ vectors with ivfflat at default `lists=100`
-- Recall dropping below expected levels when `lists` is set too high relative to dataset size
+**Why it happens:** The `fetchNewPosts(since: Date): Promise<RawPost[]>` contract implies the adapter is responsible for fetching all posts newer than `since`. For API-based sources like Reddit, this is trivially handled by the `getNew({ limit: 25 })` call with timestamp comparison. For paginated HTML, the adapter must implement a crawl loop — and that loop needs a hard termination condition beyond "no more posts found."
 
-**Prevention strategy**
-- Use ivfflat with `lists = sqrt(row_count)` as the starting rule of thumb; at <50k vectors this is almost always correct
-- Switch to hnsw only if the dataset grows beyond 500k rows — hnsw has higher build-time memory cost but better recall under concurrent inserts
-- For v1 (expected <10k offers), `CREATE INDEX ON offers USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)` is sufficient; revisit at 50k
-- Always `SET ivfflat.probes = 10` in the session before running dedup queries — the default `probes=1` cuts recall dramatically
+**How to avoid:**
+- Implement pagination with three termination conditions: (1) no `Next` link found, (2) the oldest post on the current page is older than `since` (stop — remaining pages are all older), (3) a page limit cap (`MAX_PAGES = 10`) to prevent runaway crawls
+- Apply condition (2) correctly: TheBump lists posts newest-first, so once ANY post on the current page is older than `since`, stop pagination — do not continue to the next page
+- Log `thebump_pagination_stop` with `reason` and `page_count` at the end of every crawl so pagination behavior is visible
 
-**Build phase**: Phase 3 (dedup implementation)
+**Warning signs:**
+- Worker takes 30+ seconds per TheBump poll cycle (too many pages fetched)
+- Worker logs show `page_count: 10` consistently — hitting the hard cap, meaning real termination logic is failing
+- TheBump posts older than 24 hours appearing as `ingested` with pipeline_status `tier0_passed`
 
----
+**Phase to address:** Phase 1 (TheBump adapter) — test with `since = 1 hour ago` and `since = 7 days ago` to verify both termination paths
 
-### 3.2 Dimension mismatch crashing inserts
-
-**Warning signs**
-- `ERROR: expected 1024 dimensions, not 768` on insert — wrong embedding model used somewhere in the call chain
-- Silent truncation if the column was accidentally created without an explicit dimension (`vector` instead of `vector(1024)`)
-
-**Prevention strategy**
-- The column definition must be `embedding vector(1024)` — Postgres will enforce dimension at insert time only if the explicit length is set
-- Assert `embedding.length === 1024` in the TypeScript layer before any DB insert; throw a typed error, not a silent skip
-- Pin the Voyage model to `voyage-2` (1024-dim) explicitly in every embedding call — do not rely on the API default in case Voyage changes it
-- Add a CI test that calls the embedding function with a known input and asserts output length
-
-**Build phase**: Phase 3 (dedup implementation)
 
 ---
 
-### 3.3 Extension setup order dependency
+### Pitfall 5: TheBump Rate Limiting and Anti-Scraping Measures
 
-**Warning signs**
-- `ERROR: type "vector" does not exist` on schema migration in a fresh Supabase project
-- pgmq or pg_cron migrations run before `CREATE EXTENSION vector` causing schema inconsistencies
+**What goes wrong:** TheBump does not publish rate limit headers or a robots.txt scraping policy. Sending rapid back-to-back fetch requests during pagination triggers Cloudflare or a site-level 429/403 — the scraper starts receiving challenge pages (HTML with JavaScript verification challenges) instead of forum content. Cheerio parses the challenge page, finds no posts, and returns an empty array — the adapter looks healthy but is silently blocked.
 
-**Prevention strategy**
-- Document the one-time manual Supabase setup: `CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pgmq; CREATE EXTENSION IF NOT EXISTS pg_cron;` — run in that order in the SQL editor before applying any migrations
-- Add a startup assertion in the worker: query `pg_extension` for all three and throw a clear error if any are missing, rather than failing cryptically later
-- Include a `schema.sql` comment block at the top listing the required extensions — future dev onboarding depends on it
+**Why it happens:** Unlike Reddit's OAuth API, TheBump has no explicit rate limit contract. The scraper appears to the server as a browser-less HTTP client. Without a `User-Agent`, `Accept`, and `Accept-Language` header matching a real browser, the request fingerprint is obviously non-human. Cloudflare's bot detection triggers on this within 10–20 requests.
 
-**Build phase**: Phase 0 (DB setup), documented in `packages/db/src/schema.sql`
+**How to avoid:**
+- Set a realistic `User-Agent` string (a current Chrome version on macOS) plus `Accept: text/html` and `Accept-Language: en-US,en;q=0.9` on every request
+- Add a 1–3 second random jitter between page fetches during pagination — do not fire requests back-to-back
+- Detect challenge pages by checking for the absence of expected forum content: if the `<title>` contains "Just a moment" or the body contains "Checking your browser", emit `thebump_challenge_detected` at `warn` and return empty — do not treat it as a parse error
+- Cap TheBump polling frequency at once per 10 minutes, not once per 5 minutes like Reddit
 
----
+**Warning signs:**
+- TheBump adapter consistently returns 0 posts after working initially
+- HTTP status 403 or 429 in fetch response
+- Response HTML body is short (< 1000 chars) — challenge pages are minimal HTML
+- `<title>` of response contains "Cloudflare" or "Security Check"
 
-## 4. AI Classification
+**Phase to address:** Phase 1 (TheBump adapter) — implement request throttling and challenge detection before testing against the live site
 
-### 4.1 Prompt drift and version mismatch
-
-**Warning signs**
-- Offer quality degrades gradually after a prompt edit without any logged change
-- `ai_calls.prompt_version` contains `undefined` or a stale git hash because the version wasn't threaded through to the call site
-- A/B comparing prompt versions is impossible because the column is inconsistently populated
-
-**Prevention strategy**
-- Compute `prompt_version` as `git rev-parse --short HEAD` at worker startup and inject it into every AI call log — never compute it per-call
-- Prompts live in `prompts/tier1-classify.md` and `prompts/tier2-extract.md`; load them at startup and cache in memory — never read from disk per-request
-- Any edit to a prompt file must be its own commit with a message like `prompts: update tier2-extract exclusion rules (v3)` — use `pnpm eval` to validate before merging
-
-**Build phase**: Phase 2–3 (tier workers), enforced throughout
 
 ---
 
-### 4.2 Cost explosion from Tier 0 bypass
+### Pitfall 6: Date Parsing Fragility Across Forum Formats
 
-**Warning signs**
-- Haiku spend spikes unexpectedly — Tier 0 keyword filter isn't rejecting enough
-- High-volume subreddits (e.g., r/freebies has 200+ posts/day) sending most posts to Tier 1
+**What goes wrong:** TheBump displays post timestamps in a mix of relative and absolute formats depending on recency: "2 hours ago", "Yesterday at 3:45 PM", "April 15 at 10:23 AM", "Apr 15, 2025". None of these is an ISO 8601 string. Parsing them naively via `new Date(text)` produces `Invalid Date` silently. The `posted_at` field stored in the DB is `null`, which causes the `since: Date` comparison to never filter correctly — the adapter re-fetches and re-processes all posts on every poll cycle.
 
-**Prevention strategy**
-- Tier 0 must fire before any message is enqueued for Tier 1 — enforce in the ingestion adapter, not in the Tier 1 worker
-- Track `tier0_passed=false` rejection rate in the `pipeline_health` table; if it drops below 60%, the keyword list may be too broad
-- Set a hard daily Haiku spend cap ($5) in the Anthropic dashboard; alert before it's hit, not after
+**Why it happens:** HTML forums are designed for human readability, not machine consumption. The `<time datetime="">` attribute in semantic HTML gives ISO timestamps, but only if TheBump uses the `<time>` element (they may). If they use `<span class="timestamp">2 hours ago</span>`, the scraper must parse English relative dates.
 
-**Build phase**: Phase 1 (ingestion) and Phase 2 (Tier 1 worker)
+**How to avoid:**
+- Check for `<time datetime="...">` first — this is the canonical source of machine-readable timestamps; parse the `datetime` attribute, not the text node
+- If `<time>` is absent, implement a relative-date parser covering: "X minutes ago", "X hours ago", "Yesterday at H:MM AM/PM", "Month D at H:MM AM/PM", "Mon D, YYYY" — do not use `new Date(text)` for any of these
+- Store a `Date` object in `RawPost.posted_at` only when the parse succeeds; when it fails, store `null` AND emit `thebump_date_parse_failure` at `warn` with the raw string
+- In the ingestion cycle, treat `posted_at: null` as "unknown — include in this cycle" rather than "skip" to avoid missed posts
 
----
+**Warning signs:**
+- All TheBump posts have `posted_at: null` in the DB
+- TheBump adapter re-fetches the same posts on every cycle (no effective `since` filtering)
+- `thebump_date_parse_failure` appearing in logs frequently
 
-### 4.3 Model version pinning
+**Phase to address:** Phase 1 (TheBump adapter) — write date parser unit tests against all format variants before wiring to the live site
 
-**Warning signs**
-- Anthropic silently points `claude-haiku-3` to a new minor version; Tier 1 classification behavior shifts
-- `claude-sonnet-4` output format changes break the tool-use response parser
-- `ai_calls` rows show mixed model versions after an unplanned rollout
-
-**Prevention strategy**
-- Pin to a specific dated model string: `claude-haiku-3-20240307`, `claude-sonnet-4-20240229` — never use the unversioned alias in production code
-- Store the exact model string in `ai_calls.model` — this is the audit trail if behavior changes
-- Add the model string to a `config.ts` constant so a single change propagates everywhere
-
-**Build phase**: Phase 2–3 (tier workers), never change without running `pnpm eval`
 
 ---
 
-### 4.4 Structured output / tool use parsing failures
+### Pitfall 7: Content Encoding and HTML Entity Corruption in Post Bodies
 
-**Warning signs**
-- `tool_use` block missing from Anthropic response when the model decides to reply in text instead
-- Response has `stop_reason: 'end_turn'` instead of `stop_reason: 'tool_use'` — tool was never called
-- Partial JSON inside the tool arguments field causes `JSON.parse` to throw
+**What goes wrong:** TheBump forum posts contain HTML entities (`&amp;`, `&nbsp;`, `&lt;`, `&#8220;`) and Unicode characters that must be decoded before the text is passed to Tier 0 keyword matching and Tier 1 AI classification. If Cheerio's `.text()` method is not used (i.e., `.html()` is used instead), the body stored in the DB and passed to the AI contains raw HTML markup — `<p>`, `<br>`, `<strong>`, inline image tags — which inflates token counts, distorts Tier 0 keyword matching, and burns Haiku tokens on HTML noise.
 
-**Prevention strategy**
-- Always assert `response.stop_reason === 'tool_use'` before accessing `tool_use` blocks; if not, route to DLQ with `fail_reason: 'no_tool_call'` — do not try to parse free text
-- Set `tool_choice: { type: 'tool', name: 'extract_offer' }` on Tier 2 calls to force the model to call the tool — do not rely on `auto` mode
-- Wrap the tool argument parse in `try/catch`; a parse failure = route to `human_review_queue` with the raw response attached
-- Validate the parsed tool output against a Zod schema before any DB insert — never trust raw AI output as a DB payload
+**Why it happens:** Cheerio distinguishes `.text()` (extracts text content, decodes entities) from `.html()` (returns raw inner HTML including tags). Both are valid Cheerio methods but serve different purposes. It is easy to use `.html()` when debugging (it shows more content) and then leave it in production.
 
-**Build phase**: Phase 2–3 (tier workers)
+**How to avoid:**
+- Always use `.text()` on the element that contains the post body — never `.html()` — before storing in `RawPost.body`
+- After `.text()`, apply `.trim()` and collapse internal whitespace: `text.replace(/\s+/g, ' ').trim()`
+- Validate that the extracted body does not contain `<` or `>` characters — their presence is a sign `.html()` was used by mistake
+- Check that `&amp;` entities are absent from the stored body — Cheerio's `.text()` decodes them; if they appear in the DB, the extraction is wrong
 
----
+**Warning signs:**
+- `body` column in DB contains `<p>`, `<br>`, `<strong>` strings
+- Tier 0 keyword filter misses obvious matches because the text is cluttered with HTML markup
+- Tier 1 token counts for TheBump posts are 2–3x higher than equivalent Reddit posts
 
-## 5. URL Normalization
+**Phase to address:** Phase 1 (TheBump adapter) — validate body text quality in the first integration test
 
-### 5.1 normalize-url does not follow redirects
-
-**Warning signs**
-- Two posts pointing to the same product page via different link shorteners hash to different values — dedup misses them
-- `bit.ly`, `amzn.to`, `tinyurl.com` URLs are stored as-is, making the URL hash dedup layer useless for short links
-
-**Prevention strategy**
-- Before calling `normalize-url`, perform a one-level HEAD request redirect follow: `fetch(url, { method: 'HEAD', redirect: 'manual' })` → if status is 3xx, use `response.headers.get('location')` as the real URL, then normalize that
-- Cap redirect follow at one level only — do not recurse; log if a second redirect is detected
-- Blacklist known UTM-heavy domains where normalize-url alone is sufficient (no shortener involved) to skip the network call for performance
-
-**Build phase**: Phase 3 (dedup implementation)
 
 ---
 
-### 5.2 Affiliate link laundering masking identical offers
+### Pitfall 8: ingest.ts Source Type Hard-coding Breaks TheBump Sources in DB
 
-**Warning signs**
-- Amazon affiliate links (`?tag=mysite-20`) for the same ASIN hash differently because the tag differs and normalize-url stripped only some params
-- Subreddit auto-tagging (e.g., Reddit's own `?ref=share`) generates variants of the same URL
+**What goes wrong:** The current `fetchActiveSources` in `ingest.ts` queries `.eq('type', 'reddit')`. Any TheBump source row inserted into the `sources` table with `type: 'thebump'` is silently ignored — no error, no log. The TheBump adapter is built and deployed, the source row is inserted, but zero posts ever appear.
 
-**Prevention strategy**
-- After redirect follow, strip all query params from known affiliate/tracking domains (Amazon: keep only `?dp=` and ASIN path, strip `?tag`, `?linkCode`, etc.) before hashing
-- Normalize Amazon URLs to canonical ASIN form: `https://www.amazon.com/dp/{ASIN}` — extract ASIN from any Amazon URL shape before hashing
-- For non-Amazon URLs, `normalize-url` with `removeQueryParameters: true` is sufficient for dedup hashing; store the original URL separately for display
+**Why it happens:** The filter was written as an explicit Reddit-only guard because TheBump didn't exist at v1.0. It's a natural shortcut that becomes a latent bug when a second source type is added without updating the query.
 
-**Build phase**: Phase 3 (dedup implementation)
+**How to avoid:**
+- Before writing the TheBump adapter, update `fetchActiveSources` to return all active sources (remove the `type` filter, or change it to `IN ('reddit', 'thebump')`)
+- Add a source-type dispatch table in `runIngestionCycle`: a `Map<string, (identifier: string) => SourceAdapter>` keyed by `source.type` — unknown types emit `unknown_source_type` at `warn` and skip
+- Write a test that inserts a `sources` row with `type: 'thebump'` and asserts it is returned by `fetchActiveSources`
 
----
+**Warning signs:**
+- TheBump source row exists in `sources` table but `last_polled_at` never updates
+- No `ingestion_cycle_start` log for TheBump sources
+- `fetchActiveSources` returns only Reddit sources when logged
 
-### 5.3 URL shorteners requiring JS rendering
+**Phase to address:** Phase 2 (shared adapter infrastructure) — this is the first change to make before writing any TheBump adapter code
 
-**Warning signs**
-- Some shorteners (e.g., `linktr.ee`, some custom ones) return a 200 with a JS redirect rather than a 3xx — HEAD-based redirect follow gets the shortener's landing page HTML, not the destination
-- The URL stored in the DB is the shortener's JS page, not the real product URL
-
-**Prevention strategy**
-- Detect known JS-redirect domains at the adapter level and flag the post for manual URL extraction (route to `human_review_queue`)
-- Do not use Playwright for redirect following in the hot path — it's too slow for bulk ingestion; only use it in the validation cron where latency is acceptable
-- If a URL fails HEAD-based resolution, store it with a `url_resolved=false` flag and skip embedding dedup for that post; rely on exact URL hash only
-
-**Build phase**: Phase 3 (dedup), Phase 6 (validation cron)
 
 ---
 
-## 6. Reddit-Specific
+### Pitfall 9: Adapter Registration Pattern Diverging Between Reddit and TheBump
 
-### 6.1 AutoModerator and bot account detection
+**What goes wrong:** The shared adapter infrastructure introduces a factory/registry pattern (e.g., `adapterRegistry.register('thebump', createTheBumpAdapter)`). If the Reddit adapter is partially migrated to this pattern while keeping its direct instantiation in `index.ts` as a fallback, two code paths exist for creating Reddit adapters. Future bugs are fixed in one path but not the other. Tests cover the factory path; production uses the legacy path. The two patterns diverge silently.
 
-**Warning signs**
-- Tier 0–2 pipeline processing AutoModerator stickied posts about subreddit rules
-- Bot accounts that post promotional "free sample" links (not genuine offers) passing Tier 0 keyword filter
-- `author` field is `null` on deleted accounts, causing crashes in the bot-detection filter
+**Why it happens:** Refactors that "leave the old way working" to reduce risk inadvertently create two sources of truth. The old `createRedditAdapter` call in `index.ts` is never removed because "it works" — and so the registry is never the authoritative path for Reddit.
 
-**Prevention strategy**
-- Hard-skip any post or comment where `author.name === 'AutoModerator'`
-- Maintain a bot account denylist in Tier 0 config (not in code) — check `author.name` against it before enqueuing
-- Check `post.distinguished === 'moderator'` to catch mod-posted stickied announcements
-- Handle `author === null` (deleted user) gracefully: skip the post/comment, log `{ event: 'skipped_deleted_author' }`
+**How to avoid:**
+- The refactor must be atomic for Reddit: the old `createRedditAdapter(source.identifier)` call in `ingest.ts` must be replaced by the registry lookup in the same PR — no interim state where both exist
+- Delete `createRedditAdapter` from `reddit-adapter.ts` exports after the registry takes over OR keep it as the implementation detail called by the registry factory — never let it be both a top-level export AND used directly in production code
+- The registry must be the single point of adapter creation before v1.1 ships; any direct adapter instantiation outside the registry is a bug
 
-**Build phase**: Phase 1 (Reddit ingestion adapter)
+**Warning signs:**
+- Both `createRedditAdapter` and `adapterRegistry.get('reddit')` appear in production call stacks
+- Different behavior between Reddit and TheBump ingestion paths for identical input (e.g., one logs `ingestion_cycle_start`, the other does not)
+- A bug fix applied to the registry path silently doesn't apply to the Reddit path
 
----
+**Phase to address:** Phase 2 (shared adapter infrastructure) — make the migration atomic, enforce with TypeScript visibility (mark old factory `/** @internal */` or remove the export)
 
-### 6.2 Deleted and removed posts
-
-**Warning signs**
-- `post.selftext === '[deleted]'` or `post.selftext === '[removed]'` — the body is gone, Tier 0 keyword match on empty string passes trivially
-- A post passes Tier 0 but by the time Tier 1 runs (seconds later), the post has been removed — Haiku classifies empty text as non-offer but logs a confusing result
-
-**Prevention strategy**
-- Check `selftext !== '[deleted]'` and `selftext !== '[removed]'` and `selftext.trim().length > 20` before enqueuing for Tier 1
-- For link posts (no selftext), check that the URL is not `null` before ingestion
-- If a post's URL returns 404 during validation, do not auto-expire the offer immediately — check once more 24 hours later (intermittent Reddit CDN issues are common)
-
-**Build phase**: Phase 1 (Reddit ingestion adapter)
 
 ---
 
-### 6.3 Subreddit rules and Reddit API changes
+### Pitfall 10: Embedding Dedup Semantic Mismatch Between Reddit Post Style and Forum Post Style
 
-**Warning signs**
-- A target subreddit is quarantined or made private — snoowrap returns an empty listing without throwing
-- Reddit increases OAuth requirements or introduces new API rate tiers — snoowrap's backoff breaks silently
-- Reddit scraping Terms of Service change — risk of API key revocation
+**What goes wrong:** The Voyage embedding dedup at cosine ≥ 0.85 was calibrated against Reddit post text. TheBump forum posts are written in a different register: more conversational, often in first-person, with different vocabulary and sentence structure. A Reddit post "FREE Huggies samples — just fill out the form" and a TheBump post "Has anyone gotten the free Huggies sample? I just requested mine" may describe the same offer but embed differently enough to create a duplicate offer record rather than deduplicating.
 
-**Prevention strategy**
-- Test subreddit accessibility at worker startup: call `r.getSubreddit(name).fetch()` and check `subreddit_type` — skip and alert if `private` or `restricted`
-- Monitor Reddit's API changelog; pin snoowrap and review any `snoowrap` major version bump manually
-- Store the Reddit API credentials (client_id, client_secret, refresh_token) in Supabase Vault, not in `.env.local` in production — rotation should be possible without redeployment
+**Why it happens:** The 0.85 threshold was chosen based on Reddit-vs-Reddit similarity distributions. Forum-vs-Reddit comparisons introduce a new similarity distribution that was never validated. The threshold may need to be lower (0.80) for cross-source dedup.
 
-**Build phase**: Phase 1 (Reddit ingestion adapter), Phase 5 (hardening)
+**How to avoid:**
+- Add cross-source near-duplicate pairs to `evals/labeled-posts.json` before shipping the TheBump adapter — at least 10 pairs of Reddit + TheBump posts describing the same offer
+- Run `pnpm eval` with the current 0.85 threshold against the extended eval set before shipping; adjust threshold if recall drops
+- Log the cosine similarity score for every dedup check (`dedup_cosine_score` field in a structured log) so the distribution can be analyzed in Axiom after TheBump goes live
 
----
+**Warning signs:**
+- The same offer appears in the `offers` table from two sources (one Reddit, one TheBump) with slightly different titles
+- `pnpm eval` recall drops after adding TheBump test pairs
+- Axiom shows cosine scores clustering between 0.80 and 0.85 for TheBump-Reddit pairs (just below the threshold)
 
-## 7. Deduplication
+**Phase to address:** Phase 1 (TheBump adapter, eval set extension) and Phase 2 (threshold validation after cross-source data exists)
 
-### 7.1 Cosine threshold 0.85 — too tight or too loose
-
-**Warning signs**
-- Threshold too loose (< 0.80): Tier 2 results for different but topically similar offers (two different brands of baby formula) are deduplicated into the same offer record
-- Threshold too tight (> 0.90): The same offer reposted with minor title changes creates duplicate offer records, flooding the dashboard
-
-**Prevention strategy**
-- Start at 0.85 and validate against `evals/labeled-posts.json` with `pnpm eval` — the eval must include near-duplicate pairs as well as true duplicates
-- Use URL hash as the primary dedup gate (exact match → always deduplicate); cosine threshold only fires for posts with different but similar URLs
-- Log every embedding dedup decision to `ai_calls` (or a separate `dedup_log` table) with the cosine score and both post IDs — this is the audit trail for threshold tuning
-
-**Build phase**: Phase 3 (dedup implementation), tuned against labeled data before launch
 
 ---
 
-### 7.2 Embedding dedup race condition on concurrent ingestion
+## Technical Debt Patterns
 
-**Warning signs**
-- Two posts about the same offer arrive within the same ingestion window; both pass URL hash dedup (different URLs); both enqueue for Tier 2 at the same time
-- Both Tier 2 workers run the cosine check simultaneously before either has inserted the embedding → both create new offer records
-
-**Prevention strategy**
-- Use a Postgres advisory lock around the "check cosine → insert offer" transaction: `SELECT pg_advisory_xact_lock(hashtext(destination_url))` inside the transaction
-- Alternatively, use `INSERT ... ON CONFLICT` on the `destination_url_hash` column as the final guard even if cosine dedup already ran
-- In v1 with a single worker instance, this is a low-risk edge case; document and add the lock before scaling to multiple workers
-
-**Build phase**: Phase 3 (dedup implementation)
-
----
-
-## 8. Offer Validation
-
-### 8.1 URL liveness checks hitting rate limits
-
-**Warning signs**
-- Sending 500+ HEAD requests to brand websites in a tight pg_cron window triggers Cloudflare/WAF blocks — the validator gets 403s for all URLs on a domain
-- The validator marks offers as dead because of a WAF block, not genuine expiration
-
-**Prevention strategy**
-- Spread validation requests across the daily window using jitter: select `next_check_at` using `NOW() + (random() * interval '24 hours')` when scheduling checks — do not validate all offers at midnight
-- Respect `Retry-After` headers from 429 responses; back off per domain, not globally
-- Cap concurrent validation requests to 5 at a time (not 100 in parallel) — use a semaphore in the validation worker
-- If a URL returns 403 or 429, do not mark as dead — mark as `check_failed` and retry in 6 hours
-
-**Build phase**: Phase 6 (validation cron)
+| Shortcut | Short-term Benefit | Long-term Cost |
+|----------|-------------------|----------------|
+| Hardcode TheBump selectors by generated class name | Faster initial build | Breaks on every TheBump deploy; requires emergency fix with no warning |
+| Skip pagination and only fetch page 1 | Simpler adapter code | Misses posts from large polling windows; first-run after outage loses data |
+| Leave `fetchActiveSources` Reddit-only and add a separate `fetchTheBumpSources` | No risk to Reddit | Two parallel code paths diverge; adding a third source requires touching three places |
+| Use `.html()` instead of `.text()` for quick debugging | Easier to see full content during development | HTML markup corrupts Tier 0/1 text; inflates AI token costs permanently |
+| Skip challenge page detection and just return empty on scrape failure | Simpler error handling | Cloudflare blocks are indistinguishable from "no new posts" in logs |
+| Derive `external_id` from post title slug | Easy to find in HTML | Title edits create duplicate DB rows; UNIQUE constraint violations at scale |
+| Copy-paste the Reddit ingestion loop for TheBump instead of extracting shared logic | Fastest path to working adapter | Two loops with the same bug surface; shared bug fixes require two changes |
 
 ---
 
-### 8.2 False dead signals from JS-rendered pages
+## Integration Gotchas
 
-**Warning signs**
-- A product page's static HTML contains "This item is no longer available" in a meta tag or dead-loading spinner — the validator detects a dead signal but the offer is actually live (page just loads with JS)
-- Brand websites using client-side rendering return 200 with an empty shell and no offer details — validator Cheerio parser finds "out of stock" text in a hidden template element
-
-**Prevention strategy**
-- Dead signal keyword detection must run against the rendered DOM, not the raw HTML, for known JS-heavy domains; use Playwright only for a flagged subset of URLs (those that previously returned ambiguous signals)
-- Maintain a `js_required_domains` list (hand-maintained, not auto-populated) to route validation through Playwright selectively
-- For a positive dead signal, require two consecutive failed checks 24 hours apart before auto-expiring an offer — one check is not enough
-- Log the raw HTML snippet that triggered the dead signal to `verification_log` so humans can audit false positives
-
-**Build phase**: Phase 6 (validation cron)
-
----
-
-## Cross-Cutting
-
-### Environment and secrets hygiene
-
-- `.env.local` must never contain production Supabase keys — use Supabase Vault in Railway via environment variable injection
-- All three of `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and `REDDIT_REFRESH_TOKEN` are in Vault; rotate them independently
-- Add `.env*` to `.gitignore` at the monorepo root, not just per-app
-
-### Testing blind spots
-
-- Unit tests that mock the Anthropic SDK will not catch prompt parsing failures — `pnpm eval` against `labeled-posts.json` is the only real validation for classification logic
-- pgmq integration tests need a real Postgres instance with the pgmq extension — use a local Supabase CLI instance in CI, not an in-memory mock
-- URL normalization edge cases (Amazon ASINs, affiliate params, JS redirects) should have dedicated unit tests with hardcoded URL fixtures before the dedup code is written
+| Integration Point | Mistake | Correct Approach |
+|-------------------|---------|-----------------|
+| `fetchActiveSources` in `ingest.ts` | Querying `.eq('type', 'reddit')` silently excludes TheBump sources | Query all types or use `in(['reddit', 'thebump'])` with a dispatch map |
+| `runIngestionCycle` adapter dispatch | Calling `createRedditAdapter` directly | Use a source-type registry: `Map<string, AdapterFactory>` keyed by `source.type` |
+| `SourceAdapter` interface | Adding optional parameters to `fetchNewPosts` for scraper-specific config | Pass config via constructor; keep the interface signature identical |
+| `RawPost.external_id` | Deriving from a TheBump URL slug that includes a mutable title segment | Extract only the numeric post ID from the URL; ignore the slug portion |
+| `RawPost.posted_at` | Returning `null` when date parsing fails and silently re-processing all posts | Return `null` AND log the failure; treat `null` as "include in this cycle" explicitly |
+| Tier 0 keyword filter | Applying it to raw HTML body (`.html()` output) | Always apply Tier 0 on decoded, tag-stripped `.text()` output |
+| Dedup embedding | Using Reddit-calibrated 0.85 threshold for cross-source comparisons | Validate threshold against cross-source labeled pairs in `evals/` before shipping |
+| `config.ts` env validation | Failing to add `THEBUMP_` env vars to the startup assertion block | Add any TheBump-specific env vars (e.g., `THEBUMP_BASE_URL`) to `getEnvOrThrow` checks |
+| `index.ts` loop startup | Adding a TheBump loop inside `runRedditIngestionLoop` | Add a separate `runTheBumpIngestionLoop` function and include it in `Promise.all` |
 
 ---
 
-*Last updated: 2026-04-20*
+## Performance Traps
+
+| Trap | Impact | Prevention |
+|------|--------|------------|
+| Fetching all pagination pages on every poll | 10x slower poll cycles; triggers anti-scraping at TheBump | Terminate pagination when oldest post on page is older than `since` |
+| No inter-page delay during pagination | Cloudflare block within 10–20 requests | Add 1–3s random jitter between page fetches |
+| Parsing full page HTML for body text when only the post body is needed | Extra CPU and memory for large forum pages | Use targeted Cheerio selectors: `$(postSelector).find(bodySelector).text()` — do not load entire page into a JSDOM tree |
+| Running TheBump and Reddit ingestion on the same 5-minute poll interval | TheBump's slower page fetches (network I/O + jitter) delay Reddit ingestion | Run TheBump on a 10-minute interval, Reddit on 5-minute; separate loops in `Promise.all` |
+| Voyage API call for every TheBump post at dedup time | API cost and latency if TheBump generates high post volume | Apply URL hash dedup first; only call Voyage for posts that pass URL hash check (identical to current Reddit path) |
+| No caching of TheBump base page (category listing) | Re-fetching the category page on every pagination step | Fetch the listing page once per cycle; extract all post URLs from it before fetching individual posts |
+
+---
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Storing raw scraped HTML in the DB without sanitization | XSS risk if any scraped content is rendered unescaped in the dashboard | Always use `.text()` extraction; never store raw HTML in `posts.body` |
+| Using TheBump session cookies scraped from a real browser session | TheBump ToS violation; cookie expiry causes silent adapter failure | Use unauthenticated requests to public forum pages only; TheBump freebies subforum is publicly accessible |
+| Logging full response HTML on scrape errors | Sensitive PII in TheBump posts (user names, email patterns) captured in Axiom logs | Log only HTTP status, content length, and first 200 chars of response body on error |
+| Hardcoding `User-Agent` to impersonate a specific browser version | Detectable fingerprint; can be flagged as deceptive scraping | Use a generic but realistic User-Agent; document the scraping behavior in a `robots.txt` check |
+| Not checking `robots.txt` before scraping | TheBump may disallow scraping; ToS violation risk | Fetch and parse `https://www.thebump.com/robots.txt` at startup; log which paths are disallowed; skip disallowed paths |
+
+---
+
+## "Looks Done But Isn't" Checklist
+
+After implementing the TheBump adapter and shared infrastructure, verify each of the following — the pipeline will appear functional without these checks passing:
+
+- [ ] TheBump posts appear in the `posts` table with non-null `external_id`, `title`, and `body` after a real poll cycle
+- [ ] `external_id` values are numeric strings matching the post's URL-embedded ID (not the full slug)
+- [ ] `posted_at` is non-null for at least 90% of ingested TheBump posts
+- [ ] The `posts.body` column contains no `<p>`, `<br>`, or `&amp;` strings for TheBump posts
+- [ ] TheBump `source.last_polled_at` updates after each cycle
+- [ ] Re-polling the same TheBump page produces zero new DB inserts (UNIQUE constraint works correctly)
+- [ ] Reddit ingestion still works after the shared infrastructure refactor — run the existing ingestion with a real Reddit source and confirm posts appear
+- [ ] `fetchActiveSources` returns both Reddit and TheBump source rows when both types exist in `sources`
+- [ ] A TheBump post describing the same offer as an existing Reddit offer is deduplicated (linked to the existing offer via `post_offers`, not creating a new `offers` row)
+- [ ] Cloudflare challenge page detection works: a mocked 403 response from TheBump emits `thebump_challenge_detected` at `warn` and returns `[]` without throwing
+- [ ] Pagination stops when the oldest post on a page is older than `since` — verify with `since = 30 minutes ago` that no posts older than 30 minutes are returned
+- [ ] `pnpm eval` recall does not degrade after adding TheBump test pairs to `labeled-posts.json`
+- [ ] Tier 0 keyword filter correctly processes TheBump post text (run 5 known freebies posts through and confirm they pass)
+- [ ] No TypeScript errors on `strict` after refactor — run `pnpm build` clean
+- [ ] `config.ts` env validation fails fast with a clear error if TheBump-specific env vars are missing
+
+---
+
+## Recovery Strategies
+
+| Pitfall | Recovery |
+|---------|---------|
+| TheBump selectors break on site update | Roll back selector changes; the adapter returns `[]` which is safe (no bad data inserted). Fix selectors against the new markup using browser DevTools. Add `[data-testid]`-based selectors as primary, class-based as fallback. |
+| Reddit adapter broken by refactor | `git revert` the shared infrastructure PR. Re-run ingestion with the reverted code. Then re-approach the refactor in smaller steps: first make `fetchActiveSources` type-agnostic without changing `runIngestionCycle`, run Reddit, then add TheBump dispatch. |
+| Duplicate `external_id` strategy creates DB duplicates | Write a one-time migration: `DELETE FROM posts WHERE source_id = <thebump_source_id> AND id NOT IN (SELECT MIN(id) FROM posts GROUP BY source_id, external_id)`. Fix the ID extraction logic and re-poll. |
+| Pagination loop runs indefinitely | Add a `MAX_PAGES = 10` hard cap as an emergency guard (should already exist per Pitfall 4). Kill the worker, deploy with the cap, restart. |
+| 0.85 threshold creates cross-source duplicates | Lower threshold to 0.80 via `EMBEDDING_SIMILARITY_THRESHOLD` config constant. Re-run `pnpm eval` to confirm no false-positive dedup on non-duplicate pairs. The config change is hot — no DB migration needed. |
+| TheBump Cloudflare block | Increase inter-request jitter to 3–5 seconds. Reduce polling frequency to 20-minute intervals. Add a random delay at the start of each poll cycle. If block persists, implement exponential backoff per-source. |
+| HTML body stored with markup (`.html()` bug) | Backfill: run a one-time update on `posts` table to strip HTML tags from `body` where `source_id = <thebump_source_id>`. Use a simple `body ~ '<[^>]+>'` regex in SQL to identify affected rows. Fix the `.text()` call in the adapter. |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+| Pitfall | Phase to Prevent |
+|---------|-----------------|
+| 1. DOM selector fragility | Phase 1: TheBump adapter — assertion guards on selector results |
+| 2. Breaking Reddit during refactor | Phase 2: Shared infrastructure — atomic Reddit migration with regression test |
+| 3. Unstable external_id derivation | Phase 1: TheBump adapter — ID extraction rule defined first |
+| 4. Pagination infinite loop / missing posts | Phase 1: TheBump adapter — three termination conditions + MAX_PAGES cap |
+| 5. Anti-scraping / Cloudflare blocks | Phase 1: TheBump adapter — jitter, headers, challenge detection |
+| 6. Date parsing fragility | Phase 1: TheBump adapter — date parser unit tests before integration |
+| 7. HTML entity / markup corruption | Phase 1: TheBump adapter — `.text()` + body validation in first integration test |
+| 8. ingest.ts source type hard-coding | Phase 2: Shared infrastructure — first change before any TheBump adapter work |
+| 9. Adapter registration pattern divergence | Phase 2: Shared infrastructure — atomic Reddit migration, remove old export |
+| 10. Embedding dedup cross-source mismatch | Phase 1 (eval set extension) + Phase 2 (threshold validation) |
+
+---
+
+## Sources
+
+- Existing codebase: `/apps/worker/src/ingestion/source-adapter.ts`, `reddit-adapter.ts`, `ingest.ts`, `index.ts`
+- Existing codebase: `/apps/worker/src/dedup/url-hash.ts`, `embedding-dedup.ts`
+- Existing codebase: `/apps/worker/src/config.ts`, `/packages/db/src/types.ts`
+- Project context: `/.planning/PROJECT.md` (v1.1 milestone, current state)
+- Stack: Cheerio HTML parsing, Node.js `fetch`, Supabase Postgres, pgvector, pgmq, Voyage AI, @anthropic-ai/sdk
+- Prior v1.0 pitfalls: `/.planning/research/PITFALLS.md` (snoowrap, pgmq, pgvector, AI classification, URL normalization, Reddit-specific, dedup, validation)
+
+*Last updated: 2026-04-21 — v1.1 Forum Adapters milestone*

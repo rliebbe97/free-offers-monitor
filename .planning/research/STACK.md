@@ -1,7 +1,7 @@
 # Stack Research
 
-**Domain:** Reddit/forum monitoring with AI classification pipeline
-**Researched:** 2026-04-20
+**Domain:** Forum scraping adapter infrastructure
+**Researched:** 2026-04-21
 **Confidence:** HIGH
 
 ---
@@ -10,213 +10,196 @@
 
 ### Core Technologies
 
-| Technology | Version | Purpose | Why Recommended |
-|---|---|---|---|
-| pnpm | 10.33.0 | Package manager + workspace orchestration | Native monorepo workspaces, strict hoisting, faster than npm/yarn |
-| Turborepo | 2.9.6 | Monorepo task runner + build cache | Remote cache, dependency graph awareness, first-class pnpm support |
-| Node.js | 22.x LTS | Worker runtime | LTS with built-in fetch, `--env-file`, native `crypto.hash()` |
-| TypeScript | 6.0.3 | Type-safe JavaScript | Strict mode, latest `satisfies`, no `any` policy |
-| Next.js | 16.2.4 | Dashboard frontend | App Router, RSC, built-in Vercel deployment, no config deploys |
-| React | 19.2.5 | UI library (peer dep of Next.js) | Required by Next.js 16; concurrent features, server actions |
-| Supabase JS | 2.104.0 | Database client (Postgres + Auth + Vault) | Single SDK for DB, Auth, realtime, Vault — avoids direct pg wiring |
-| @anthropic-ai/sdk | 0.90.0 | Haiku classifier + Sonnet extractor | Official SDK, streaming, tool use, typed responses — no wrappers |
-| voyageai | 0.2.1 | 1024-dim semantic embeddings for dedup | Superior retrieval quality vs OpenAI at lower cost per token |
-| snoowrap | 1.23.0 | Reddit API client | Most mature Node.js Reddit wrapper; handles OAuth + rate-limit backoff |
-| Cheerio | 1.2.0 | HTML parsing/scraping | Lightweight jQuery-like API, no headless browser overhead |
-| Vitest | 4.1.4 | Test runner | Native ESM, TypeScript-first, compatible with pnpm workspaces |
-| Tailwind CSS | 4.2.2 | Utility-first CSS | Required by shadcn/ui; zero-runtime, purges unused styles |
-| shadcn/ui | 4.3.1 | Component library (CLI-installed) | Copies source into repo, no upstream runtime dependency |
-
----
+No new core runtime technologies are required. The TheBump adapter runs inside the existing worker (Node.js 22, TypeScript strict, pnpm workspaces) and leverages the already-installed `fetch` + `cheerio` combination. The `SourceAdapter` interface in `apps/worker/src/ingestion/source-adapter.ts` already defines the contract — no interface changes needed.
 
 ### Supporting Libraries
 
-| Library | Version | Purpose | When to Use |
-|---|---|---|---|
-| zod | 4.3.6 | Runtime schema validation + type inference | Validate AI tool-use responses, API inputs, env vars |
-| normalize-url | 9.0.0 | URL normalization (strips UTM, trailing slashes) | Before URL hashing for dedup — does NOT follow redirects |
-| dotenv | 17.4.2 | Load `.env.local` in dev | Worker dev mode; Supabase Vault replaces this in prod |
-| @supabase/ssr | 0.10.2 | Supabase Auth helpers for Next.js App Router | Cookie-based session handling in Server Components + middleware |
-| @axiomhq/js | 1.6.0 | Structured log shipping to Axiom | Worker ingestion events, pipeline metrics, error traces |
-| p-limit | 7.3.0 | Concurrency limiter for async operations | Throttle Reddit API calls and embedding requests |
-| p-retry | 8.0.0 | Retry with exponential backoff | Wrap Voyage AI and Anthropic calls for transient failures |
-| lucide-react | 1.8.0 | Icon set for dashboard UI | Consistent with shadcn/ui design system |
-| class-variance-authority | 0.7.1 | Type-safe CSS variant composition | Used internally by shadcn/ui components |
-| clsx | 2.1.1 | Conditional className utility | Combine Tailwind classes conditionally |
-| tailwind-merge | 3.5.0 | Merge conflicting Tailwind classes safely | Prevent duplicate utility conflicts in component variants |
-| @types/node | 22.15.3 | Node.js type definitions | Worker TypeScript compilation |
-| @types/snoowrap | 1.19.0 | Incomplete snoowrap type stubs | Use `@ts-ignore` where stubs are wrong — see Gotchas |
+The following libraries are new additions (not currently in `apps/worker/package.json`):
 
----
+| Library | Version | Purpose | Why Recommended |
+|---|---|---|---|
+| `p-throttle` | 8.1.0 | Per-adapter request rate limiter | Ensures TheBump fetch loop stays well under any server-side rate limits without blocking the entire event loop. More ergonomic than `p-limit` for time-windowed throttling (e.g., 1 req/2s). Already using `p-limit` for concurrency — this fills the orthogonal time-rate gap. |
+| `playwright` | 1.59.1 | Headless browser fallback (conditional) | TheBump forum pages are currently server-rendered HTML — Cheerio-first is correct. Add `playwright` only as a dev/optional dependency now so the conditional path exists; activate if a future poll cycle returns a JS-challenge page or Cloudflare IUAM page. Do NOT install `@playwright/test` in prod bundle. |
 
 ### Development Tools
 
-| Tool | Purpose | Notes |
-|---|---|---|
-| ESLint 9 | Linting with flat config (`eslint.config.js`) | Use `typescript-eslint` v8 flat config format; no `.eslintrc` |
-| Prettier 3.8.3 | Consistent code formatting | Run via `pnpm format`; pair with `eslint-config-prettier` |
-| tsx 4.21.0 | Run TypeScript files directly in Node.js | Use for worker dev mode (`pnpm dev --filter worker`) |
-| Playwright | Conditional — only if JS rendering required | Do not include by default; add only when Cheerio is insufficient |
-| Supabase CLI | DB migrations, type generation, local dev | `pnpm db:generate` invokes this for schema → TypeScript types |
+No new dev tooling is required. Existing Vitest, tsx, tsup, and ESLint setup covers the new adapter code.
 
 ---
 
-## What NOT to Use
+## Installation
+
+```bash
+# Add to apps/worker — new production dependency
+pnpm add p-throttle --filter worker
+
+# Add playwright as optional (dev-only until needed)
+pnpm add -D playwright --filter worker
+# If/when Playwright is activated, run once to download browsers:
+npx playwright install chromium --with-deps
+```
+
+---
+
+## What NOT to Add
 
 | Library | Why to Avoid |
 |---|---|
-| LangChain | Over-abstraction, version churn, hides token costs, incompatible with direct `ai_calls` logging requirement |
-| Vercel AI SDK | Wraps `@anthropic-ai/sdk`, prevents direct control of tool-use schema and logging; explicitly out of scope |
-| OpenAI SDK | Wrong provider — Anthropic only via `@anthropic-ai/sdk` |
-| OpenAI Embeddings | Voyage AI selected for higher retrieval quality at lower cost; do not mix embedding providers |
-| Prisma | Supabase JS client is the data layer; Prisma adds friction with pgvector and pgmq extensions |
-| Drizzle ORM | Same reason as Prisma — raw Supabase client + typed schema from `@repo/db` is sufficient |
-| SQS / RabbitMQ / BullMQ | pgmq keeps queuing in Postgres — no extra infra, no separate connection pool |
-| node-cron | pg_cron handles scheduled validation inside Postgres — no in-process scheduler needed |
-| node-fetch | Node 22 has native `fetch` built in — no polyfill required |
-| winston / pino | Axiom (`@axiomhq/js`) is the structured log destination; local `console.*` is fine for non-prod |
-| next-auth | Supabase Auth with email allowlist is the auth layer; next-auth conflicts with `@supabase/ssr` |
+| `got` | Native `fetch` (Node 22 built-in) is sufficient for simple GET requests with headers. `got` adds 15+ dependencies and retry logic already covered by `p-retry` (already installed). |
+| `axios` | Same reason as `got` — redundant with native `fetch`. |
+| `puppeteer` | Playwright is the chosen headless fallback (already in the v1.0 STACK.md dev tools list). Do not add both. |
+| `node-html-parser` | Cheerio 1.2.0 is already installed and provides the right jQuery-like selector API for scraping Vanilla Forums HTML. A second HTML parser adds zero value. |
+| `tough-cookie` | TheBump forum threads are publicly accessible without login. No session/cookie management needed for the read-only scrape path. If login-gated content is needed in a future milestone, add then. |
+| `user-agents` | A single well-formed static `User-Agent` header is sufficient. A randomized UA library is overkill and harder to debug. |
+| `bottleneck` | `p-throttle` covers time-windowed rate limiting cleanly. `bottleneck` is a heavier distributed rate limiter designed for multi-process scenarios — unnecessary here. |
+| `https-proxy-agent` | No proxy infrastructure in this project. If TheBump blocks the Railway egress IP in future, address as a separate ops decision — do not preemptively add. |
 
 ---
 
-## Configuration Notes
+## Stack Patterns by Adapter Variant
 
-### pgvector
-
-```sql
--- Run once on fresh Supabase project (via SQL editor or migration)
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- Voyage embeddings are exactly 1024 dimensions — must match
-ALTER TABLE offers ADD COLUMN embedding vector(1024);
-
--- IVFFlat index for approximate nearest-neighbor search
--- lists = sqrt(row_count) is a good starting value; tune after 10k+ rows
-CREATE INDEX ON offers USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-
--- Cosine similarity query pattern (threshold >= 0.85 = duplicate)
-SELECT id, 1 - (embedding <=> $1::vector) AS similarity
-FROM offers
-ORDER BY embedding <=> $1::vector
-LIMIT 5;
-```
-
-Key points:
-- `vector(1024)` is hardcoded to Voyage AI output — do not use a different embedding provider without a migration.
-- `ivfflat` requires at least ~1000 rows to be useful; fall back to sequential scan in dev.
-- Enable `pgvector` extension before running any migration that references the `vector` type.
-
----
-
-### pgmq
-
-pgmq is a Postgres extension available on Supabase. Messages are consumed via SQL functions.
-
-```sql
--- Create queues (run once)
-SELECT pgmq.create('tier1_queue');
-SELECT pgmq.create('tier2_queue');
-
--- Produce a message (from app code via Supabase RPC)
-SELECT pgmq.send('tier1_queue', '{"post_id": "abc123"}'::jsonb);
-
--- Consume (long-poll, visibility timeout = 30s)
-SELECT * FROM pgmq.read('tier1_queue', 30, 10);
-
--- CRITICAL: Archive after successful processing (or message re-delivers after timeout)
-SELECT pgmq.archive('tier1_queue', msg_id);
-
--- Delete instead of archive if you don't need the audit trail
-SELECT pgmq.delete('tier1_queue', msg_id);
-```
-
-Key points:
-- Always call `pgmq.archive(queue_name, msg_id)` after successful processing. Failure to do so causes re-delivery after the visibility timeout expires.
-- Use `pgmq.read` with a conservative visibility timeout (30–60s) that exceeds your expected processing time.
-- Set `max_retries` logic at the application level — pgmq does not have native DLQ; route failed messages to `human_review_queue` after N failures.
-- `pg_cron` can trigger queue reads for scheduled jobs (e.g., daily validation sweep).
-
----
-
-### snoowrap OAuth
-
-snoowrap requires a Reddit OAuth "script" app for server-side use.
+### Pattern A: Static HTML (Cheerio-first) — Applies to TheBump Now
 
 ```typescript
-import Snoowrap from 'snoowrap';
+// apps/worker/src/ingestion/thebump-adapter.ts
+import { load } from 'cheerio';
+import { pThrottle } from 'p-throttle';
+import type { RawPost, SourceAdapter } from './source-adapter.js';
 
-const reddit = new Snoowrap({
-  userAgent: 'free-offers-monitor/1.0 by u/YourRedditUsername',
-  clientId: process.env.REDDIT_CLIENT_ID,
-  clientSecret: process.env.REDDIT_CLIENT_SECRET,
-  username: process.env.REDDIT_USERNAME,
-  password: process.env.REDDIT_PASSWORD,
-});
+const throttledFetch = pThrottle({ limit: 1, interval: 2000 })(
+  async (url: string, init?: RequestInit) => fetch(url, init)
+);
 
-// Rate limit: 100 req/min with OAuth. snoowrap handles backoff automatically.
-// Log when it triggers — check `reddit.ratelimitRemaining` after calls.
-// @ts-ignore is expected on some API response shapes — types are incomplete.
-```
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; free-offers-monitor/1.1; +https://github.com/your-org/free-offers-monitor)',
+  'Accept': 'text/html,application/xhtml+xml',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
 
-Key points:
-- Create a "script" type app at reddit.com/prefs/apps — not "web app" or "installed app".
-- `userAgent` must be descriptive and include your Reddit username to avoid bans.
-- snoowrap handles OAuth token refresh and rate-limit backoff automatically, but you must log when backoff triggers (check `ratelimitRemaining`).
-- Ingest top-level comments and one reply deep only. Skip posts/comments by AutoModerator and known bot accounts.
-- Types are incomplete — `@ts-ignore` on specific response fields is acceptable and expected.
+export class TheBumpAdapter implements SourceAdapter {
+  constructor(private readonly discussionId: string) {}
 
----
-
-### URL Normalization + Hashing Pattern
-
-```typescript
-import normalizeUrl from 'normalize-url';
-import { createHash } from 'node:crypto';
-
-async function normalizeAndHash(rawUrl: string): Promise<string> {
-  // 1. Follow one level of redirects (normalize-url does NOT do this)
-  const resolved = await followOneRedirect(rawUrl);
-
-  // 2. Normalize: strips UTM params, trailing slashes, etc.
-  const normalized = normalizeUrl(resolved, {
-    stripWWW: true,
-    removeQueryParameters: [/^utm_/i, 'ref', 'source'],
-    sortQueryParameters: true,
-  });
-
-  // 3. Hash for dedup index lookup
-  return createHash('sha256').update(normalized).digest('hex');
+  async fetchNewPosts(since: Date): Promise<RawPost[]> {
+    // 1. Fetch page 1, parse total page count from pagination HTML
+    // 2. Iterate pages in reverse (newest first), stop when post.posted_at < since
+    // 3. Use cheerio selectors: .Comments .Item, .UserLink, .DateLink, .Message
+    // 4. Return RawPost[] — external_id = comment ID from /discussion/comment/[ID]
+  }
 }
 ```
 
-Key points:
-- `normalize-url` v9 is ESM-only — use `import`, not `require`.
-- Always follow one redirect level before normalizing — affiliate links and tracking URLs will mismatch otherwise.
-- Store the hash in `offers.destination_url_hash` with a `UNIQUE` index for O(1) dedup lookups.
+### Pattern B: JS-Rendered Fallback (Playwright) — Conditional Path
+
+Activate only when Cheerio fetch returns a Cloudflare challenge page (HTTP 403, or `<title>` contains "Just a moment" / "Checking your browser"). Do not activate proactively.
+
+```typescript
+// Detect challenge page in Cheerio path:
+const $ = load(html);
+const isChallenge =
+  $('title').text().includes('Just a moment') ||
+  $('title').text().includes('Checking your browser') ||
+  res.status === 403;
+
+if (isChallenge) {
+  // fall through to Playwright path
+}
+```
+
+### Pattern C: Shared Base Class (Adapter Infrastructure)
+
+```typescript
+// apps/worker/src/ingestion/base-html-adapter.ts
+export abstract class BaseHtmlAdapter implements SourceAdapter {
+  protected abstract readonly baseUrl: string;
+  protected abstract parsePostsFromPage(html: string, pageUrl: string): RawPost[];
+  protected abstract getNextPageUrl(html: string, currentUrl: string): string | null;
+
+  async fetchNewPosts(since: Date): Promise<RawPost[]> {
+    // Shared: throttled fetch, pagination loop, since-date cutoff, error logging
+  }
+}
+```
+
+This base class extracts the pagination/fetch loop common to all HTML forum adapters. `RedditAdapter` does NOT extend it (it uses snoowrap, not raw fetch). Only HTML-scraped adapters (TheBump, future Discourse boards) inherit from `BaseHtmlAdapter`.
 
 ---
 
-### Environment Variables
+## TheBump Forum Structure (Verified 2026-04-21)
 
+| Property | Value |
+|---|---|
+| Forum software | Vanilla Forums (PHP-based, Higher Logic acquired 2021) |
+| Rendering | Server-rendered HTML — content present in initial response |
+| Freebies threads | Discussion threads, not a dedicated category. Target by discussion ID. |
+| Key thread IDs | `12727626` (Steals, Deals, Freebies, & Coups), `12745853` (Pregnancy + Baby Freebies), `12607983` (All the Free Baby Stuff), `12726602` (Free baby stuff), `12709081` (Free Stuff!) |
+| Thread URL pattern | `https://forums.thebump.com/discussion/{id}/{slug}` |
+| Pagination | `/p2`, `/p3`, etc. appended to thread URL |
+| Comment URL pattern | `/discussion/comment/{comment-id}/#Comment_{comment-id}` |
+| Post timestamp format | Relative ("November 2017") in HTML; absolute time in comment permalink |
+| robots.txt disallows | `/entry/`, `/messages/`, `/profile/`, `/search/` — discussion pages are NOT disallowed |
+| WAF evidence | None observed in public HTML responses; no Cloudflare challenge pages encountered |
+
+---
+
+## Integration with Existing Stack
+
+| Existing capability | How TheBump adapter uses it |
+|---|---|
+| `cheerio` ^1.0.0 (already installed) | HTML parsing — no version change needed |
+| `p-retry` 8.0.0 (already installed) | Wrap `fetch` calls for transient network errors |
+| `p-limit` 7.3.0 (already installed) | Cap concurrent page fetches if parallelism is added |
+| `@axiomhq/js` 1.6.0 (already installed) | Log fetch errors, rate limit warnings, page counts |
+| `sources` DB table (`type` column) | Add `type: 'thebump'` rows; `identifier` = discussion ID |
+| `ingest.ts` `runIngestionCycle` | Extend to route `type: 'thebump'` sources to `TheBumpAdapter` |
+| `SourceAdapter` interface | `TheBumpAdapter` implements it unchanged |
+
+The one code change required in `ingest.ts` is removing the `redditSources` filter and routing by `source.type`:
+
+```typescript
+// Before (reddit-only):
+const redditSources = sources.filter((s) => s.type === 'reddit');
+
+// After (multi-adapter):
+for (const source of sources) {
+  const adapter = createAdapter(source); // factory by source.type
+  ...
+}
 ```
-# Worker (.env.local)
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-ANTHROPIC_API_KEY=
-VOYAGE_API_KEY=
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USERNAME=
-REDDIT_PASSWORD=
-AXIOM_TOKEN=
-AXIOM_DATASET=
 
-# Dashboard (.env.local)
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=   # server-only, never NEXT_PUBLIC_
-AXIOM_TOKEN=
-AXIOM_DATASET=
-```
+---
 
-In production, sensitive keys (ANTHROPIC_API_KEY, VOYAGE_API_KEY, REDDIT_*) are stored in Supabase Vault and injected via Railway environment. Never commit `.env` or `.env.local`.
+## Version Compatibility
+
+| Library | Node req | ESM? | Notes |
+|---|---|---|---|
+| `p-throttle` 8.1.0 | Node 18+ | ESM-only | Import as `import { pThrottle } from 'p-throttle'` |
+| `playwright` 1.59.1 | Node 18+ | CJS + ESM | Import as `import { chromium } from 'playwright'` — keep in conditional path only |
+| `cheerio` 1.2.0 | Node 18+ | ESM-only | Already installed; confirm `^1.0.0` resolves to 1.2.0 |
+
+All packages are ESM-compatible, matching the worker's `"type": "module"` in `package.json`.
+
+---
+
+## Alternatives Considered
+
+| Alternative | Considered for | Rejected because |
+|---|---|---|
+| `got` 15.0.3 | HTTP client for page fetching | Native `fetch` in Node 22 is sufficient; `got` adds unnecessary dependency weight |
+| `node-html-parser` 7.1.0 | HTML parsing | Cheerio already installed with jQuery-like API; switching parsers yields no benefit |
+| `bottleneck` 2.19.5 | Rate limiting | Designed for distributed/multi-process scenarios; `p-throttle` is simpler and sufficient |
+| `puppeteer` (latest) | JS-rendered fallback | Playwright already in dev tools list from v1.0; don't add a second headless driver |
+| Dedicated Discourse scraper (e.g., `discourse-api`) | Future Discourse adapters | TheBump is not Discourse; premature to add. If Discourse sources are added, evaluate then. |
+
+---
+
+## Sources
+
+- npm registry: cheerio 1.2.0 — https://registry.npmjs.org/cheerio/latest
+- npm registry: p-throttle 8.1.0 — https://registry.npmjs.org/p-throttle/latest
+- npm registry: playwright 1.59.1 — https://registry.npmjs.org/playwright/latest
+- npm registry: p-queue 9.1.2 — https://registry.npmjs.org/p-queue/latest
+- npm registry: got 15.0.3 — https://registry.npmjs.org/got/latest
+- TheBump forum categories — https://forums.thebump.com/categories
+- TheBump freebies threads verified live — https://forums.thebump.com/discussion/12727626/steals-deals-freebies-coups
+- TheBump robots.txt — https://forums.thebump.com/robots.txt
+- Vanilla Forums technology — https://success.vanillaforums.com/kb/articles/138-vanilla-technology-stack
