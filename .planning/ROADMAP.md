@@ -82,8 +82,8 @@
 
 ### Plans
 
-- [ ] 04-01-PLAN.md — Auth infrastructure, Supabase client factories, proxy.ts, login page, dashboard layout shell with sidebar and header
-- [ ] 04-02-PLAN.md — Offer list (pagination/filter/sort), review queue (approve/reject server actions), AI call log viewer (sortable columns)
+- [x] 04-01-PLAN.md — Auth infrastructure, Supabase client factories, proxy.ts, login page, dashboard layout shell with sidebar and header
+- [x] 04-02-PLAN.md — Offer list (pagination/filter/sort), review queue (approve/reject server actions), AI call log viewer (sortable columns)
 
 ---
 
