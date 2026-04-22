@@ -25,6 +25,7 @@ interface Tier2Expected {
 interface LabeledPost {
   id: string;
   source: string;
+  cross_source_pair_id?: string;
   url: string;
   external_id: string;
   title: string;
