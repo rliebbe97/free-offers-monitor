@@ -47,6 +47,50 @@ interface Tier1Response {
 const PASS_THRESHOLD = 0.7; // minimum accuracy to exit 0
 const MODEL = 'claude-haiku-4-20250514'; // matches TIER1_MODEL in config.ts
 
+/**
+ * Compute cosine similarity between two vectors.
+ * Voyage embeddings are NOT pre-normalized, so full normalization is required.
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i]! * b[i]!;
+    normA += a[i]! ** 2;
+    normB += b[i]! ** 2;
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Embed text using the Voyage AI API (same pattern as embedding-dedup.ts).
+ * Returns a 1024-dimensional vector.
+ */
+async function embedTextForEval(text: string, voyageKey: string): Promise<number[]> {
+  const response = await fetch('https://api.voyageai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${voyageKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: [text], model: 'voyage-2' }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Voyage API error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as { data: Array<{ embedding: number[] }> };
+  const embedding = data.data[0]?.embedding;
+
+  if (!embedding || embedding.length !== 1024) {
+    throw new Error(`Expected 1024-dim embedding, got: ${embedding?.length ?? 'null'}`);
+  }
+
+  return embedding;
+}
+
 async function main(): Promise<void> {
   const posts: LabeledPost[] = JSON.parse(
     readFileSync(join(__dirname, 'labeled-posts.json'), 'utf-8'),
