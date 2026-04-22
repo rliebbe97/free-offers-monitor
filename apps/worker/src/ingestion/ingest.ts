@@ -3,17 +3,33 @@ import { logger } from '../logger.js';
 import { passesKeywordFilter } from '../tiers/tier0.js';
 import { enqueueTier1 } from '../queue/producer.js';
 import { createRedditAdapter } from './reddit-adapter.js';
+import { createTheBumpAdapter } from './thebump-adapter.js';
+import type { SourceAdapter } from './source-adapter.js';
 
 type DbClient = ReturnType<typeof createClient>;
 
 /**
- * Fetch all active Reddit sources from the sources table.
+ * Create the appropriate adapter for a given source based on its type.
+ * Throws on unknown source types — never silently skip.
+ */
+export function createAdapterForSource(source: Source): SourceAdapter {
+  switch (source.type) {
+    case 'reddit':
+      return createRedditAdapter(source.identifier);
+    case 'bump':
+      return createTheBumpAdapter(source.identifier);
+    default:
+      throw new Error(`Unknown source type: ${source.type}`);
+  }
+}
+
+/**
+ * Fetch all active sources from the sources table.
  */
 export async function fetchActiveSources(db: DbClient): Promise<Source[]> {
   const { data, error } = await db
     .from('sources')
-    .select('*')
-    .eq('type', 'reddit');
+    .select('*');
 
   if (error) {
     throw new Error(`Failed to fetch active sources: ${error.message}`);
@@ -23,10 +39,10 @@ export async function fetchActiveSources(db: DbClient): Promise<Source[]> {
 }
 
 /**
- * Run one full ingestion cycle across all active Reddit sources.
+ * Run one full ingestion cycle across all active sources.
  *
  * For each source:
- * 1. Fetch new posts via RedditAdapter (bot/deleted filtering happens in adapter)
+ * 1. Fetch new posts via source adapter (bot/deleted filtering happens in adapter)
  * 2. Upsert each post to the posts table (UNIQUE(source_id, external_id))
  * 3. Run Tier 0 keyword filter on combined title + body
  * 4. Update post with tier0_passed and pipeline_status
@@ -34,9 +50,7 @@ export async function fetchActiveSources(db: DbClient): Promise<Source[]> {
  * 6. Update source.last_polled_at to now
  */
 export async function runIngestionCycle(db: DbClient, sources: Source[]): Promise<void> {
-  const redditSources = sources.filter((s) => s.type === 'reddit');
-
-  for (const source of redditSources) {
+  for (const source of sources) {
     const since = source.last_polled_at
       ? new Date(source.last_polled_at)
       : new Date(Date.now() - 60 * 60 * 1000); // fallback: 1 hour ago on first run
@@ -47,7 +61,7 @@ export async function runIngestionCycle(db: DbClient, sources: Source[]): Promis
       since: since.toISOString(),
     });
 
-    const adapter = createRedditAdapter(source.identifier);
+    const adapter = createAdapterForSource(source);
     let posts;
     try {
       posts = await adapter.fetchNewPosts(since);
