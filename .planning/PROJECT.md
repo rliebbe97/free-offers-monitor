@@ -2,27 +2,19 @@
 
 ## What This Is
 
-An automated pipeline that scans Reddit for genuinely free physical goods offerings for new mothers and families with babies. It uses a three-tier AI classification system (keyword filter, Haiku classifier, Sonnet extractor) with deduplication via URL hashing and Voyage embeddings, validates offer liveness daily, and surfaces verified offers through an auth-gated Next.js dashboard with review queue capabilities.
+An automated pipeline that scans Reddit and TheBump forums for genuinely free physical goods offerings for new mothers and families with babies. It uses a three-tier AI classification system (keyword filter, Haiku classifier, Sonnet extractor) with deduplication via URL hashing and Voyage embeddings, validates offer liveness daily, and surfaces verified offers through an auth-gated Next.js dashboard with review queue capabilities. A type-agnostic source dispatch factory enables adding new forum adapters without modifying the core pipeline.
 
 ## Core Value
 
 Reliably surface genuinely free physical goods (zero shipping, no coupons, no trials, no sweepstakes) from noisy forum data — false negatives cost missed offers, false positives erode trust.
 
-## Current Milestone: v1.1 Forum Adapters
-
-**Goal:** Expand ingestion beyond Reddit with a TheBump community adapter and reusable adapter infrastructure.
-
-**Target features:**
-- TheBump community adapter (freebies/deals subforums, Cheerio scraping, feeds into existing 3-tier pipeline)
-- Shared adapter infrastructure (base classes, shared scraping utilities, config-driven source registration extracted from Reddit + TheBump patterns)
-
 ## Current State
 
 **Shipped:** v1.0 MVP (2026-04-21), v1.1 Forum Adapters (2026-04-22)
-**Codebase:** ~27,365 LOC TypeScript across monorepo (pnpm workspaces + Turborepo)
-**Tech stack:** Next.js 14, Supabase (Postgres + pgvector + pgmq + pg_cron), @anthropic-ai/sdk, Voyage AI, snoowrap, Cheerio
+**Codebase:** ~37,000 LOC TypeScript across monorepo (pnpm workspaces + Turborepo)
+**Tech stack:** Next.js 14, Supabase (Postgres + pgvector + pgmq + pg_cron), @anthropic-ai/sdk, Voyage AI, snoowrap, Cheerio, p-throttle
 
-The full pipeline is built: multi-source ingestion (Reddit + TheBump) via type-agnostic dispatch factory -> Tier 0 keyword filter -> Tier 1 Haiku classifier -> Tier 2 Sonnet extractor -> URL hash + embedding dedup -> offer creation -> daily validation cron -> dashboard with auth, offer list, review queue, and AI call log viewer. Cross-source dedup validated with 10 Reddit+TheBump eval pairs.
+The full pipeline is built: multi-source ingestion (Reddit + TheBump) via type-agnostic dispatch factory -> Tier 0 keyword filter -> Tier 1 Haiku classifier -> Tier 2 Sonnet extractor -> URL hash + embedding dedup -> offer creation -> daily validation cron -> dashboard with auth, offer list, review queue, and AI call log viewer. Cross-source dedup validated with 10 Reddit+TheBump eval pairs. 41 unit tests cover the ingestion layer; 13 cover validation.
 
 ## Requirements
 
@@ -43,11 +35,15 @@ The full pipeline is built: multi-source ingestion (Reddit + TheBump) via type-a
 - ✓ Offer list with pagination, filter, sort — v1.0
 - ✓ Review queue with approve/reject actions — v1.0
 - ✓ AI call log viewer with sortable columns — v1.0
+- ✓ Shared scraping utilities (fetchWithRetry, respectfulDelay, rate limiting) — v1.1
+- ✓ BaseForumAdapter abstract class with template-method pagination — v1.1
+- ✓ TheBump adapter (freebies/deals subforums, Cheerio scraping) — v1.1
+- ✓ Source dispatch factory replacing hardcoded Reddit-only pipeline — v1.1
+- ✓ Cross-source eval dataset with dedup cosine validation — v1.1
 
 ### Active
 
-- [ ] TheBump community adapter (freebies/deals subforums, Cheerio scraping)
-- [ ] Shared adapter infrastructure (base classes, scraping utilities, config-driven source registration)
+(No active requirements — next milestone not yet planned)
 
 ### Out of Scope
 
@@ -56,26 +52,26 @@ The full pipeline is built: multi-source ingestion (Reddit + TheBump) via type-a
 - Auto-modifying Tier 0 keyword list — human decides, system only suggests
 - LangChain / Vercel AI SDK / AI wrappers — use @anthropic-ai/sdk directly
 - Auto-publishing low-confidence offers — < 0.7 confidence always routes to human review
-- Email digest of new verified offers — deferred to future milestone
-- Pipeline throughput metrics dashboard — deferred to future milestone
-- AI cost tracking with daily/weekly aggregates — deferred to future milestone
-- Bulk approve/reject in review queue — deferred to future milestone
-- Offer edit capability for correcting extracted data — deferred to future milestone
-- CLI adapter builder flow — deferred to backlog
+- Full comment scraping (all replies) — 10-50x HTTP request multiplication for marginal signal
+- Playwright for TheBump ingestion — pages are server-rendered; Cheerio suffices
+- Authenticated/cookie-based scraping — target subforums are public
+- TheBump internal API usage — undocumented, ToS risk
 
 ## Context
 
-Shipped v1.0 MVP with ~27,365 LOC TypeScript.
-Tech stack: Next.js 14, Supabase, @anthropic-ai/sdk (Haiku + Sonnet), Voyage AI, snoowrap, Cheerio.
-Worker runs 4 concurrent loops: Reddit ingestion, Tier 1, Tier 2, validation.
+Shipped v1.1 Forum Adapters with ~37,000 LOC TypeScript.
+Tech stack: Next.js 14, Supabase, @anthropic-ai/sdk (Haiku + Sonnet), Voyage AI, snoowrap, Cheerio, p-throttle.
+Worker runs 4 concurrent loops: multi-source ingestion, Tier 1, Tier 2, validation.
 Dashboard deploys to Vercel, worker to Railway.
-13 Vitest tests for validation module.
+54 Vitest tests across ingestion and validation modules.
+Eval system: 21 labeled posts with Tier 1 accuracy gate and cross-source dedup cosine scoring.
 Hand-written DB types — run `pnpm db:generate` against live Supabase to reconcile.
 
 ## Constraints
 
 - **AI SDK**: Must use `@anthropic-ai/sdk` directly — no wrapper libraries
 - **Reddit rate limits**: 100 req/min with OAuth; snoowrap handles backoff but must log triggers
+- **TheBump rate limits**: 1 req/2s via p-throttle + 1-3s respectfulDelay jitter
 - **Embedding dimensions**: Voyage embeddings are 1024-dim — pgvector column must be `vector(1024)`
 - **pgmq**: Messages need explicit `archive()` after processing or they re-deliver
 - **URL normalization**: `normalize-url` strips UTM but doesn't follow redirects — custom one-level redirect follow required before hashing
@@ -95,6 +91,10 @@ Hand-written DB types — run `pnpm db:generate` against live Supabase to reconc
 | Next.js 16 proxy over middleware | Newer API replaces deprecated middleware for session gating | ✓ Good — cleaner request interception |
 | Forced tool use for Tier 2 | Guarantees structured output from Sonnet without parsing ambiguity | ✓ Good — Zod validation catches malformed outputs reliably |
 | Two-consecutive-failure expiry | Avoids false expiry from transient network issues | ✓ Good — WAF detection prevents false positives from 403/429 |
+| Template-method pattern for BaseForumAdapter | Subclasses only provide selectors; base owns pagination, rate limiting, challenge detection | ✓ Good — TheBump adapter is minimal; pattern ready for BabyCenter/WhatToExpect |
+| p-throttle for time-windowed rate limiting | Complements existing p-retry and p-limit without overlap | ✓ Good — clean separation of concerns |
+| Type-agnostic source dispatch factory | Decouples pipeline from specific adapters; new sources require only factory case + adapter class | ✓ Good — Reddit migration was atomic and non-breaking |
+| Synthetic HTML fixtures for adapter tests | Deterministic tests; structure verified against live site | ✓ Good — 41 tests pass reliably without network dependency |
 
 ## Evolution
 
@@ -114,4 +114,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after v1.1 milestone start*
+*Last updated: 2026-04-22 after v1.1 milestone completion*

@@ -29,3 +29,36 @@ Full end-to-end pipeline for scanning Reddit for genuinely free physical goods, 
 
 - [Roadmap Archive](milestones/v1.0-ROADMAP.md)
 - [Requirements Archive](milestones/v1.0-REQUIREMENTS.md)
+
+---
+
+## v1.1 — Forum Adapters
+
+**Shipped:** 2026-04-22
+**Phases:** 2 | **Plans:** 10
+**Commits:** 52 | **Files:** 62 changed | **LOC:** +10,324 / -1,173
+**Timeline:** 2026-04-21 → 2026-04-22
+
+### Delivered
+
+Expanded ingestion beyond Reddit with a TheBump community adapter (Cheerio scraping, 3-termination pagination, Cloudflare detection) and migrated the production pipeline to a type-agnostic source dispatch factory. Built reusable BaseForumAdapter infrastructure, 41 unit tests, and an eval system with 21 labeled posts and cross-source dedup validation.
+
+### Key Accomplishments
+
+1. Shared scraping utilities (fetchWithRetry, respectfulDelay, p-throttle rate limiting) and BaseForumAdapter abstract class with template-method pagination
+2. TheBumpAdapter with Cheerio scraping: numeric external_id extraction, `<time datetime>` date parsing with relative-date fallback, Cloudflare challenge detection, .text()-only body extraction
+3. Type-agnostic source dispatch factory (createAdapterForSource) replacing hardcoded Reddit-only pipeline — both adapters run through unified runIngestionCycle
+4. 41 unit tests covering complete ingestion layer (scraping-utils, base adapter, TheBump adapter, factory)
+5. Eval system with 21 labeled posts (10 cross-source Reddit+TheBump pairs) and Tier 1 classifier + dedup cosine scoring
+6. DB seed migration for TheBump source rows with idempotent ON CONFLICT guards
+
+### Known Deferred Items
+
+- Phase 05 verification: human_needed — live TheBump scrape, pnpm eval with API key, DB migration application
+- Phase 06: live cosine eval with VOYAGE_API_KEY, live worker run with bump source
+- Known deferred items at close: 1 (see STATE.md Deferred Items)
+
+### Archive
+
+- [Roadmap Archive](milestones/v1.1-ROADMAP.md)
+- [Requirements Archive](milestones/v1.1-REQUIREMENTS.md)
