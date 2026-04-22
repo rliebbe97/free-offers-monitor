@@ -87,10 +87,10 @@ async function createDlqQueues(db: DbClient): Promise<void> {
 }
 
 /**
- * Reddit polling loop — fetches sources and runs one ingestion cycle per interval.
+ * Ingestion polling loop — fetches sources and runs one ingestion cycle per interval.
  * Catches errors per cycle so a transient failure does not crash the process.
  */
-async function runRedditIngestionLoop(
+async function runIngestionLoop(
   db: DbClient,
   shutdown: { stop: boolean },
 ): Promise<void> {
@@ -161,7 +161,7 @@ async function runTier2ConsumerLoop(
 
 /**
  * Worker entry point. Performs startup assertions, loads prompts, starts
- * the HTTP health endpoint, and runs the Reddit ingestion loop and Tier 1
+ * the HTTP health endpoint, and runs the ingestion loop and Tier 1
  * consumer concurrently.
  */
 async function main(): Promise<void> {
@@ -223,9 +223,9 @@ async function main(): Promise<void> {
 
   logger.info('worker_started', { port, prompt_version: promptVersion });
 
-  // Run Reddit polling loop, Tier 1 consumer, Tier 2 consumer, and validation loop concurrently
+  // Run ingestion polling loop, Tier 1 consumer, Tier 2 consumer, and validation loop concurrently
   await Promise.all([
-    runRedditIngestionLoop(db, shutdown),
+    runIngestionLoop(db, shutdown),
     runTier1ConsumerLoop(db, anthropic, tier1Prompt, promptVersion, shutdown),
     runTier2ConsumerLoop(db, anthropic, tier2Prompt, promptVersion, shutdown),
     runValidationLoop(db, shutdown),
