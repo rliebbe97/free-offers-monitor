@@ -2,6 +2,7 @@
   {
     "id": "thebump-10234567",
     "source": "thebump",
+    "cross_source_pair_id": "pair-001",
     "url": "https://community.thebump.com/discussion/10234567/free-diaper-samples-in-the-mail",
     "external_id": "10234567",
     "title": "Free diaper samples — just got mine in the mail!",
@@ -20,6 +21,7 @@
   {
     "id": "thebump-10345891",
     "source": "thebump",
+    "cross_source_pair_id": "pair-002",
     "url": "https://community.thebump.com/discussion/10345891/similac-formula-sample-box-arrived",
     "external_id": "10345891",
     "title": "Similac sent me a huge formula sample box for free!",
@@ -38,6 +40,7 @@
   {
     "id": "thebump-10456122",
     "source": "thebump",
+    "cross_source_pair_id": "pair-003",
     "url": "https://community.thebump.com/discussion/10456122/hospital-baby-welcome-bag-whats-in-yours",
     "external_id": "10456122",
     "title": "Did anyone else get the free baby welcome bag from their hospital?",
@@ -56,6 +59,7 @@
   {
     "id": "thebump-10512034",
     "source": "thebump",
+    "cross_source_pair_id": "pair-004",
     "url": "https://community.thebump.com/discussion/10512034/free-breast-pump-through-insurance-guide",
     "external_id": "10512034",
     "title": "Reminder: you can get a FREE breast pump through insurance — here's how",
@@ -74,6 +78,7 @@
   {
     "id": "thebump-10623789",
     "source": "thebump",
+    "cross_source_pair_id": "pair-005",
     "url": "https://community.thebump.com/discussion/10623789/gerber-free-baby-food-samples-pack",
     "external_id": "10623789",
     "title": "Gerber is sending free baby food samples — no catch!",
@@ -92,6 +97,7 @@
   {
     "id": "thebump-10701245",
     "source": "thebump",
+    "cross_source_pair_id": "pair-008",
     "url": "https://community.thebump.com/discussion/10701245/50-percent-off-diaper-coupon-target",
     "external_id": "10701245",
     "title": "50% off diaper coupon code at Target — expires Sunday!",
@@ -106,6 +112,7 @@
   {
     "id": "thebump-10789034",
     "source": "thebump",
+    "cross_source_pair_id": "pair-009",
     "url": "https://community.thebump.com/discussion/10789034/free-30-day-diaper-subscription-trial",
     "external_id": "10789034",
     "title": "FREE 30-day trial of Hello Bello diaper subscription",
@@ -120,6 +127,7 @@
   {
     "id": "thebump-10834561",
     "source": "thebump",
+    "cross_source_pair_id": "pair-007",
     "url": "https://community.thebump.com/discussion/10834561/win-a-free-uppa-stroller-sweepstakes",
     "external_id": "10834561",
     "title": "Enter to win a FREE UPPAbaby stroller! Sweepstakes ends April 30",
@@ -134,6 +142,7 @@
   {
     "id": "thebump-10912278",
     "source": "thebump",
+    "cross_source_pair_id": "pair-010",
     "url": "https://community.thebump.com/discussion/10912278/free-lactation-consultant-video-call",
     "external_id": "10912278",
     "title": "Free lactation consultant virtual appointment — worth it!",
@@ -158,5 +167,190 @@
     "tier2_expected": null,
     "label_reason": "Buy-one-get-one deal — requires purchase of first item, not genuinely free.",
     "notes": "BOGO requires initial purchase — reject per 'requires purchase' rule"
+  },
+  {
+    "id": "reddit-abc123",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-001",
+    "url": "https://reddit.com/r/FreeSamples/comments/abc123/free_pampers_newborn_samples",
+    "external_id": "abc123",
+    "title": "FREE Pampers newborn samples — just requested mine!",
+    "body": "Pampers is giving away free newborn diaper samples again. No CC needed, just fill out the form on their website. Got mine in about 2 weeks. Zero shipping cost. Perfect for figuring out sizing before baby arrives.",
+    "author": "diaper_deal_finder",
+    "posted_at": "2026-02-16T09:00:00Z",
+    "label": "pass",
+    "tier2_expected": {
+      "is_valid_offer": true,
+      "item": "diaper samples (newborn)",
+      "shipping_cost": "free"
+    },
+    "label_reason": "Same Pampers diaper sample offer as pair-001 TheBump entry, described from a Reddit perspective.",
+    "notes": "Cross-source pair-001 Reddit side — same offer, different register"
+  },
+  {
+    "id": "reddit-def456",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-002",
+    "url": "https://reddit.com/r/BabyBumps/comments/def456/similac_strongmoms_free_formula_samples",
+    "external_id": "def456",
+    "title": "Similac StrongMoms free formula sample box — worth signing up",
+    "body": "PSA: Similac's StrongMoms program sends you a big sample box with three different formula cans. Completely free, no shipping cost. I signed up around 20 weeks and the box showed up a month later. Great way to try different formulas before committing.",
+    "author": "frugal_new_dad",
+    "posted_at": "2026-03-02T15:30:00Z",
+    "label": "pass",
+    "tier2_expected": {
+      "is_valid_offer": true,
+      "item": "formula sample box (three sample cans)",
+      "shipping_cost": "free"
+    },
+    "label_reason": "Same Similac formula sample program as pair-002 TheBump entry, Reddit phrasing.",
+    "notes": "Cross-source pair-002 Reddit side — same program, different wording"
+  },
+  {
+    "id": "reddit-ghi789",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-003",
+    "url": "https://reddit.com/r/NewParents/comments/ghi789/hospital_gave_us_free_baby_welcome_kit",
+    "external_id": "ghi789",
+    "title": "Hospital gave us an amazing free baby welcome kit — what was in yours?",
+    "body": "Just got discharged and they handed us a big bag full of free baby stuff — diapers, wipes, onesie, formula samples, nipple cream, and a bunch of other samples. Completely free as part of their new parent program. Partnered with Pampers I think. Anyone else get one of these?",
+    "author": "new_dad_2026",
+    "posted_at": "2026-01-30T18:45:00Z",
+    "label": "pass",
+    "tier2_expected": {
+      "is_valid_offer": true,
+      "item": "baby welcome kit (diapers, wipes, onesie, formula samples, nipple cream)",
+      "shipping_cost": "free"
+    },
+    "label_reason": "Same hospital welcome bag program as pair-003 TheBump entry, described from Reddit.",
+    "notes": "Cross-source pair-003 Reddit side — same hospital program, different voice"
+  },
+  {
+    "id": "reddit-jkl012",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-004",
+    "url": "https://reddit.com/r/BreastFeeding/comments/jkl012/free_breast_pump_through_insurance_guide",
+    "external_id": "jkl012",
+    "title": "Guide: how to get a FREE breast pump through insurance (Spectra S2)",
+    "body": "Under the ACA your insurance must cover a breast pump at zero cost. I used Aeroflow and they handled everything — filled out a form, they verified my insurance, and shipped a Spectra S2 to my door about 3 weeks before due date. No shipping, nothing out of pocket. Highly recommend.",
+    "author": "pump_advisor",
+    "posted_at": "2026-02-07T11:20:00Z",
+    "label": "pass",
+    "tier2_expected": {
+      "is_valid_offer": true,
+      "item": "breast pump (Spectra S2)",
+      "shipping_cost": "free"
+    },
+    "label_reason": "Same insurance breast pump program as pair-004 TheBump entry, Reddit formatting.",
+    "notes": "Cross-source pair-004 Reddit side — same Aeroflow+Spectra program"
+  },
+  {
+    "id": "reddit-mno345",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-005",
+    "url": "https://reddit.com/r/FreeSamples/comments/mno345/gerber_baby_food_sample_pack_free",
+    "external_id": "mno345",
+    "title": "Gerber free baby food sample pack — just arrived in the mail",
+    "body": "Signed up on Gerber's website months ago and forgot about it. Box just showed up with several puree pouches and a small jar. Totally free, they covered shipping. Nice variety of first foods if your little one is starting solids.",
+    "author": "sample_queen_mom",
+    "posted_at": "2026-03-12T08:15:00Z",
+    "label": "pass",
+    "tier2_expected": {
+      "is_valid_offer": true,
+      "item": "baby food sample pack (puree pouches and jar)",
+      "shipping_cost": "free"
+    },
+    "label_reason": "Same Gerber baby food sample program as pair-005 TheBump entry, Reddit version.",
+    "notes": "Cross-source pair-005 Reddit side — same Gerber program"
+  },
+  {
+    "id": "reddit-pqr678",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-006",
+    "url": "https://reddit.com/r/BabyDeals/comments/pqr678/40_off_huggies_amazon_code",
+    "external_id": "pqr678",
+    "title": "40% off Huggies on Amazon — use code HUGGY40",
+    "body": "Amazon has a 40% off promo on Huggies diapers right now with code HUGGY40. You still pay the remaining 60% but its a solid deal. Clip the coupon on the product page and add the code at checkout. Worked for all sizes.",
+    "author": "deal_dad_2026",
+    "posted_at": "2026-03-15T07:00:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Discount coupon requiring payment — not genuinely free.",
+    "notes": "Cross-source pair-006 Reddit side — coupon reject"
+  },
+  {
+    "id": "thebump-11100001",
+    "source": "thebump",
+    "cross_source_pair_id": "pair-006",
+    "url": "https://community.thebump.com/discussion/11100001/amazon-huggies-diaper-deal-40-off",
+    "external_id": "11100001",
+    "title": "Amazon Huggies deal — 40% off with promo code!",
+    "body": "Just found this deal on Amazon — you can get 40% off any Huggies diapers with code HUGGY40. Not totally free but such a good price. I stocked up on sizes 1 and 2. The code stacks with Subscribe and Save too!",
+    "author": "BargainMama2026",
+    "posted_at": "2026-03-15T12:30:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Discount coupon requiring payment — not genuinely free.",
+    "notes": "Cross-source pair-006 TheBump side — same coupon deal, reject"
+  },
+  {
+    "id": "reddit-stu901",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-007",
+    "url": "https://reddit.com/r/Freebies/comments/stu901/babylist_uppababy_stroller_giveaway",
+    "external_id": "stu901",
+    "title": "Babylist UPPAbaby Vista giveaway — enter by April 30",
+    "body": "Babylist is doing a giveaway for an UPPAbaby Vista V2 stroller worth $1200. Just enter your email. No purchase necessary but its random selection. Drawing is end of April. Good luck!",
+    "author": "giveaway_tracker",
+    "posted_at": "2026-04-02T14:00:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Sweepstakes — random selection, not guaranteed to receive.",
+    "notes": "Cross-source pair-007 Reddit side — same sweepstakes as thebump-10834561"
+  },
+  {
+    "id": "reddit-vwx234",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-008",
+    "url": "https://reddit.com/r/BabyDeals/comments/vwx234/50_off_target_diaper_coupon",
+    "external_id": "vwx234",
+    "title": "50% off diapers at Target — coupon code inside",
+    "body": "Target has a 50% off coupon code for diapers right now, works on all brands. Still have to pay the other half obviously but pretty good if you need to stock up. Code is TARGET50BABY at checkout. Expires this Sunday.",
+    "author": "target_deal_hunter",
+    "posted_at": "2026-02-20T10:30:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Discount coupon requiring payment — not genuinely free.",
+    "notes": "Cross-source pair-008 Reddit side — same coupon deal as thebump-10701245"
+  },
+  {
+    "id": "reddit-yza567",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-009",
+    "url": "https://reddit.com/r/BabyBumps/comments/yza567/hello_bello_free_trial_30_days",
+    "external_id": "yza567",
+    "title": "Hello Bello diaper subscription — 30-day free trial",
+    "body": "Hello Bello is offering a 30-day free trial of their diaper subscription. You get a bundle shipped free but you need a credit card on file and it auto-renews at like $65/month after the trial. Make sure to cancel if you don't want to keep it. The diapers are decent quality though.",
+    "author": "subscription_skeptic",
+    "posted_at": "2026-03-05T16:00:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Subscription trial requiring credit card — not genuinely free.",
+    "notes": "Cross-source pair-009 Reddit side — same trial as thebump-10789034"
+  },
+  {
+    "id": "reddit-bcd890",
+    "source": "reddit",
+    "cross_source_pair_id": "pair-010",
+    "url": "https://reddit.com/r/BreastFeeding/comments/bcd890/free_virtual_lactation_consultant",
+    "external_id": "bcd890",
+    "title": "Free virtual lactation consultant session — has anyone tried this?",
+    "body": "Found a service offering a free virtual lactation consultation for first-time moms. Its a video call with an IBCLC. No physical product shipped but honestly it was super helpful when I was struggling with latch. They also try to sell you a course afterward but the initial consult is genuinely free.",
+    "author": "breastfeeding_journey",
+    "posted_at": "2026-03-18T13:45:00Z",
+    "label": "reject",
+    "tier2_expected": null,
+    "label_reason": "Service, not a physical good — not in scope for offer criteria.",
+    "notes": "Cross-source pair-010 Reddit side — same service as thebump-10912278"
   }
 ]
