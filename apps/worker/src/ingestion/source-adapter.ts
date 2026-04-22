@@ -13,7 +13,7 @@ export interface RawPost {
 
 /**
  * Contract that every ingestion adapter must implement.
- * Implementations: RedditAdapter (apps/worker/src/ingestion/reddit-adapter.ts)
+ * Implementations: RedditAdapter (reddit-adapter.ts), TheBumpAdapter (thebump-adapter.ts)
  */
 export interface SourceAdapter {
   fetchNewPosts(since: Date): Promise<RawPost[]>;
