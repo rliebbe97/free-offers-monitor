@@ -10,11 +10,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // CLAUDE.md's "Every Tier 1/2 call MUST log to ai_calls table" applies to the
 // worker pipeline only, not standalone eval scripts.
 
-// NOTE: Tier 2 eval execution deferred to Phase 6 — the tier2_expected field is
-// populated in labeled-posts.json now (ROADMAP SC#3 compliance), but run-eval.ts
-// only executes Tier 1 classification in this phase. Phase 6 will extend the eval
-// runner to invoke Tier 2 extraction on entries where label === 'pass' and compare
-// against tier2_expected. The labeled data is ready; only the execution code is deferred.
+// NOTE: Tier 2 eval execution deferred — the tier2_expected field is populated in
+// labeled-posts.json but run-eval.ts only executes Tier 1 classification and dedup
+// cosine validation. A future phase will extend the eval runner to invoke Tier 2
+// extraction on entries where label === 'pass' and compare against tier2_expected.
 
 interface Tier2Expected {
   is_valid_offer: boolean;
@@ -185,6 +184,75 @@ async function main(): Promise<void> {
   console.log('\nConfusion Matrix:');
   console.log(`  TP=${truePositives}  FP=${falsePositives}`);
   console.log(`  FN=${falseNegatives}  TN=${trueNegatives}`);
+
+  // --- Dedup Cosine Score Validation ---
+  // Inline threshold — cannot import from config.ts due to getEnvOrThrow side effects at module load
+  const DEDUP_THRESHOLD = 0.85; // mirrors EMBEDDING_SIMILARITY_THRESHOLD in apps/worker/src/config.ts
+
+  // Group entries by cross_source_pair_id
+  const pairMap = new Map<string, LabeledPost[]>();
+  for (const post of posts) {
+    if (post.cross_source_pair_id) {
+      const existing = pairMap.get(post.cross_source_pair_id) ?? [];
+      existing.push(post);
+      pairMap.set(post.cross_source_pair_id, existing);
+    }
+  }
+
+  // Filter to pairs with exactly 2 members
+  const validPairs = Array.from(pairMap.entries()).filter(([, members]) => members.length === 2);
+
+  if (validPairs.length > 0) {
+    const voyageKey = process.env.VOYAGE_API_KEY;
+    if (!voyageKey) {
+      console.warn('\nSKIP: Dedup cosine validation — VOYAGE_API_KEY not set');
+    } else {
+      console.log(`\n--- Dedup Cosine Score Validation (${validPairs.length} pairs) ---\n`);
+      console.log('Pair ID    | Source A   | Source B   | Cosine   | Threshold | Result');
+      console.log('-----------|-----------|-----------|----------|-----------|-------');
+
+      let pairsAbove = 0;
+      let pairsBelow = 0;
+
+      for (const [pairId, members] of validPairs) {
+        const [a, b] = members as [LabeledPost, LabeledPost];
+        const textA = `${a.title ?? ''} ${a.body ?? ''}`;
+        const textB = `${b.title ?? ''} ${b.body ?? ''}`;
+
+        try {
+          const embeddingA = await embedTextForEval(textA, voyageKey);
+          const embeddingB = await embedTextForEval(textB, voyageKey);
+          const cosine = cosineSimilarity(embeddingA, embeddingB);
+
+          const above = cosine >= DEDUP_THRESHOLD;
+          if (above) pairsAbove++;
+          else pairsBelow++;
+
+          const paddedPairId = pairId.padEnd(11);
+          const paddedSourceA = a.source.padEnd(10);
+          const paddedSourceB = b.source.padEnd(10);
+          console.log(
+            `${paddedPairId}| ${paddedSourceA}| ${paddedSourceB}| ${cosine.toFixed(4).padEnd(9)}| ${DEDUP_THRESHOLD.toFixed(2).padEnd(10)}| ${above ? 'ABOVE' : 'BELOW'}`,
+          );
+        } catch (err) {
+          console.error(`  VOYAGE ERROR for ${pairId}: ${String(err)}`);
+        }
+      }
+
+      console.log('\n--- Dedup Summary ---');
+      console.log(`Total pairs:     ${validPairs.length}`);
+      console.log(`Above threshold: ${pairsAbove}`);
+      console.log(`Below threshold: ${pairsBelow}`);
+      console.log(`Threshold:       ${DEDUP_THRESHOLD}`);
+
+      if (pairsBelow > 0) {
+        console.warn(
+          `\nWARN: ${pairsBelow} cross-source pair(s) scored below ${DEDUP_THRESHOLD} — ` +
+          'consider lowering EMBEDDING_SIMILARITY_THRESHOLD in config.ts',
+        );
+      }
+    }
+  }
 
   if (accuracy < PASS_THRESHOLD) {
     console.error(`\nFAIL: accuracy ${accuracy.toFixed(2)} below threshold ${PASS_THRESHOLD}`);
