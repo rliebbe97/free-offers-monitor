@@ -18,11 +18,11 @@ Reliably surface genuinely free physical goods (zero shipping, no coupons, no tr
 
 ## Current State
 
-**Shipped:** v1.0 MVP (2026-04-21)
+**Shipped:** v1.0 MVP (2026-04-21), v1.1 Forum Adapters (2026-04-22)
 **Codebase:** ~27,365 LOC TypeScript across monorepo (pnpm workspaces + Turborepo)
 **Tech stack:** Next.js 14, Supabase (Postgres + pgvector + pgmq + pg_cron), @anthropic-ai/sdk, Voyage AI, snoowrap, Cheerio
 
-The full pipeline is built: Reddit ingestion -> Tier 0 keyword filter -> Tier 1 Haiku classifier -> Tier 2 Sonnet extractor -> URL hash + embedding dedup -> offer creation -> daily validation cron -> dashboard with auth, offer list, review queue, and AI call log viewer.
+The full pipeline is built: multi-source ingestion (Reddit + TheBump) via type-agnostic dispatch factory -> Tier 0 keyword filter -> Tier 1 Haiku classifier -> Tier 2 Sonnet extractor -> URL hash + embedding dedup -> offer creation -> daily validation cron -> dashboard with auth, offer list, review queue, and AI call log viewer. Cross-source dedup validated with 10 Reddit+TheBump eval pairs.
 
 ## Requirements
 
