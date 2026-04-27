@@ -40,3 +40,6 @@ yarn-error.log*
 # Claude
 CLAUDE.md
 .claude/
+
+# Internal planning artifacts — kept locally, not published
+.planning/
