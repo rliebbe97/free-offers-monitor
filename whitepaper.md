@@ -175,7 +175,7 @@ Required Postgres extensions (must be enabled on the Supabase project): `vector`
 
 ## 6. Operational Characteristics
 
-- **Cost shape.** Tier 0 is free. Tier 1 (Haiku) is $0.80 / M input, $4 / M output — cheap per call but the volume pivot. Tier 2 (Sonnet) is $3 / M input, $15 / M output — fires only on pre-filtered candidates. Every call persists `cost_usd` to `ai_calls`, so spend is queryable per tier, per day, per prompt version.
+- **Cost shape.** Tier 0 is free. Tier 1 (Haiku 4.5) is $1 / M input, $5 / M output — cheap per call but the volume pivot. Tier 2 (Sonnet 4.6) is $3 / M input, $15 / M output — fires only on pre-filtered candidates. Every call persists `cost_usd` to `ai_calls`, so spend is queryable per tier, per day, per prompt version.
 - **Observability.** Prompt versioning is baked in: every AI call records the git SHA of the prompt file, enabling regression analysis when a prompt changes. Pipeline state on each post (`pipeline_status`) makes it trivial to bucket stuck work.
 - **Resilience.** pgmq visibility timeouts auto-redeliver messages whose workers crash. Tier 1 and Tier 2 each have a DLQ. URL dedup uses `ON CONFLICT DO NOTHING` as a race guard. Validation uses exponential-ish backoff (24h → expired) and distinguishes WAF blocks from real failures.
 - **Model pinning.** Model IDs are pinned to dated versions (`claude-haiku-4-5-20251001`, `claude-sonnet-4-6`) — never unversioned aliases — so extraction behavior is reproducible across deploys.

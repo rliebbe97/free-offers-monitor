@@ -12,9 +12,11 @@ getEnvOrThrow('VOYAGE_API_KEY');
 export const TIER1_MODEL = 'claude-haiku-4-5-20251001';
 export const TIER2_MODEL = 'claude-sonnet-4-6';
 
-// Per-token pricing constants (USD)
+// Per-token pricing constants (USD), per Anthropic's published rates as of 2026-04
+// Haiku 4.5: $1 / MTok input, $5 / MTok output
+// Sonnet 4.6: $3 / MTok input, $15 / MTok output
 export const MODEL_PRICING = {
-  [TIER1_MODEL]: { input: 0.80 / 1_000_000, output: 4.00 / 1_000_000 },
+  [TIER1_MODEL]: { input: 1.00 / 1_000_000, output: 5.00 / 1_000_000 },
   [TIER2_MODEL]: { input: 3.00 / 1_000_000, output: 15.00 / 1_000_000 },
 } as const;
 

@@ -178,10 +178,17 @@ export async function processTier1(options: ProcessTier1Options): Promise<void> 
     content: rawText.slice(0, 1000), // truncate for storage
   };
 
-  // Step 4: Parse and validate the JSON response
+  // Step 4: Parse and validate the JSON response.
+  // Newer Haiku versions sometimes wrap JSON in ```json fences despite the prompt
+  // forbidding it. Strip them before parsing so we don't false-fail on valid output.
+  const cleanedText = rawText
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+
   let parsedJson: unknown;
   try {
-    parsedJson = JSON.parse(rawText);
+    parsedJson = JSON.parse(cleanedText);
   } catch (parseErr) {
     const errorMsg = `JSON parse failed: ${String(parseErr)}. Raw: ${rawText.slice(0, 200)}`;
 

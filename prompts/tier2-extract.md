@@ -19,6 +19,19 @@ Set `is_excluded: true` and provide an `exclusion_reason` if ANY of these apply:
 - **Requires purchase** — "free with purchase of", BOGO, or rebate after purchase
 - **Referral requirement** — "free if you refer X friends" introduces an ineligible barrier
 
+## What is NOT an exclusion
+
+Do NOT set `is_excluded: true` simply because eligibility is mediated by a third party,
+as long as the user pays $0 out of pocket and receives a physical good. In particular:
+
+- **Insurance-mediated free goods** (e.g. ACA-covered breast pumps shipped via Aeroflow,
+  WIC-distributed formula, Medicaid-covered supplies) are PASS — the user pays nothing,
+  the item is physical, and verification of coverage is not a payment barrier.
+- **Hospital welcome boxes, government / nonprofit programs, and brand sample programs
+  with eligibility checks** are PASS as long as the user does not pay.
+- Capture eligibility constraints in `restrictions` (e.g. "Requires ACA-compliant
+  insurance"), not as exclusions.
+
 ## Confidence Score
 
 Set `confidence` to reflect your certainty that this is a genuine free physical goods offer:

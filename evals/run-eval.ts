@@ -63,31 +63,54 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Embed text using the Voyage AI API (same pattern as embedding-dedup.ts).
- * Returns a 1024-dimensional vector.
+ * Batch-embed multiple texts in a single Voyage API call. Voyage accepts up to 128
+ * inputs per request, so the eval's 20-ish texts fit in one call. This sidesteps
+ * the per-request rate limit (which 429'd on serial calls). Retries up to 4 times
+ * on 429, honoring Retry-After when present.
  */
-async function embedTextForEval(text: string, voyageKey: string): Promise<number[]> {
-  const response = await fetch('https://api.voyageai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${voyageKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ input: [text], model: 'voyage-2' }),
-  });
+async function embedBatchForEval(texts: string[], voyageKey: string): Promise<number[][]> {
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+  const MAX_ATTEMPTS = 4;
 
-  if (!response.ok) {
-    throw new Error(`Voyage API error: ${response.status} ${response.statusText}`);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const response = await fetch('https://api.voyageai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${voyageKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input: texts, model: 'voyage-2' }),
+    });
+
+    if (response.status === 429 && attempt < MAX_ATTEMPTS) {
+      const retryAfter = Number(response.headers.get('retry-after')) || 0;
+      const backoffMs = retryAfter > 0 ? retryAfter * 1000 : 5_000 * 2 ** (attempt - 1);
+      await sleep(backoffMs);
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Voyage API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { data: Array<{ embedding: number[]; index: number }> };
+    const embeddings = data.data
+      .slice()
+      .sort((x, y) => x.index - y.index)
+      .map((d) => d.embedding);
+
+    if (embeddings.length !== texts.length) {
+      throw new Error(`Expected ${texts.length} embeddings, got ${embeddings.length}`);
+    }
+    for (const e of embeddings) {
+      if (!e || e.length !== 1024) {
+        throw new Error(`Expected 1024-dim embedding, got: ${e?.length ?? 'null'}`);
+      }
+    }
+    return embeddings;
   }
 
-  const data = (await response.json()) as { data: Array<{ embedding: number[] }> };
-  const embedding = data.data[0]?.embedding;
-
-  if (!embedding || embedding.length !== 1024) {
-    throw new Error(`Expected 1024-dim embedding, got: ${embedding?.length ?? 'null'}`);
-  }
-
-  return embedding;
+  throw new Error('Voyage API: exceeded retry budget on 429');
 }
 
 async function main(): Promise<void> {
@@ -221,16 +244,28 @@ async function main(): Promise<void> {
       let pairsAbove = 0;
       let pairsBelow = 0;
 
+      // Build a single batch of all texts (2 per pair). One Voyage call avoids the
+      // per-request rate limit that 429'd serial calls. Voyage accepts up to 128
+      // inputs per request; 10 pairs × 2 = 20 fits easily.
+      const flatTexts: string[] = [];
+      const pairIndexes: Array<{ pairId: string; a: LabeledPost; b: LabeledPost; iA: number; iB: number }> = [];
       for (const [pairId, members] of validPairs) {
         const [a, b] = members as [LabeledPost, LabeledPost];
-        const textA = `${a.title ?? ''} ${a.body ?? ''}`;
-        const textB = `${b.title ?? ''} ${b.body ?? ''}`;
+        const iA = flatTexts.push(`${a.title ?? ''} ${a.body ?? ''}`) - 1;
+        const iB = flatTexts.push(`${b.title ?? ''} ${b.body ?? ''}`) - 1;
+        pairIndexes.push({ pairId, a, b, iA, iB });
+      }
 
-        try {
-          const embeddingA = await embedTextForEval(textA, voyageKey);
-          const embeddingB = await embedTextForEval(textB, voyageKey);
-          const cosine = cosineSimilarity(embeddingA, embeddingB);
+      let allEmbeddings: number[][] = [];
+      try {
+        allEmbeddings = await embedBatchForEval(flatTexts, voyageKey);
+      } catch (err) {
+        console.error(`  VOYAGE BATCH ERROR: ${String(err)}`);
+      }
 
+      if (allEmbeddings.length === flatTexts.length) {
+        for (const { pairId, a, b, iA, iB } of pairIndexes) {
+          const cosine = cosineSimilarity(allEmbeddings[iA]!, allEmbeddings[iB]!);
           const above = cosine >= DEDUP_THRESHOLD;
           if (above) pairsAbove++;
           else pairsBelow++;
@@ -241,8 +276,6 @@ async function main(): Promise<void> {
           console.log(
             `${paddedPairId}| ${paddedSourceA}| ${paddedSourceB}| ${cosine.toFixed(4).padEnd(9)}| ${DEDUP_THRESHOLD.toFixed(2).padEnd(10)}| ${above ? 'ABOVE' : 'BELOW'}`,
           );
-        } catch (err) {
-          console.error(`  VOYAGE ERROR for ${pairId}: ${String(err)}`);
         }
       }
 
