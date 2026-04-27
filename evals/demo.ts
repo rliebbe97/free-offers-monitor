@@ -12,11 +12,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Like run-eval.ts, this script bypasses the worker pipeline and does NOT log
 // to the ai_calls table. It is dev-time only.
 
-// NOTE: Using current available model IDs. The IDs pinned in apps/worker/src/config.ts
-// (claude-haiku-4-20250514 / claude-sonnet-4-5-20250514) return 404 from the Anthropic API
-// — they appear to be stale or never-released aliases. This demo overrides with real IDs.
-const TIER1_MODEL = process.env.DEMO_TIER1_MODEL ?? 'claude-haiku-4-5-20251001';
-const TIER2_MODEL = process.env.DEMO_TIER2_MODEL ?? 'claude-sonnet-4-6';
+const TIER1_MODEL = 'claude-haiku-4-5-20251001'; // matches TIER1_MODEL in config.ts
+const TIER2_MODEL = 'claude-sonnet-4-6'; // matches TIER2_MODEL in config.ts
 
 const DEMO_IDS = [
   'thebump-10234567', // clear pass — free diaper samples

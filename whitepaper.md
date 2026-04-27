@@ -178,7 +178,7 @@ Required Postgres extensions (must be enabled on the Supabase project): `vector`
 - **Cost shape.** Tier 0 is free. Tier 1 (Haiku) is $0.80 / M input, $4 / M output — cheap per call but the volume pivot. Tier 2 (Sonnet) is $3 / M input, $15 / M output — fires only on pre-filtered candidates. Every call persists `cost_usd` to `ai_calls`, so spend is queryable per tier, per day, per prompt version.
 - **Observability.** Prompt versioning is baked in: every AI call records the git SHA of the prompt file, enabling regression analysis when a prompt changes. Pipeline state on each post (`pipeline_status`) makes it trivial to bucket stuck work.
 - **Resilience.** pgmq visibility timeouts auto-redeliver messages whose workers crash. Tier 1 and Tier 2 each have a DLQ. URL dedup uses `ON CONFLICT DO NOTHING` as a race guard. Validation uses exponential-ish backoff (24h → expired) and distinguishes WAF blocks from real failures.
-- **Model pinning.** Model IDs are pinned to dated versions (`claude-haiku-4-20250514`, `claude-sonnet-4-5-20250514`) — never unversioned aliases — so extraction behavior is reproducible across deploys.
+- **Model pinning.** Model IDs are pinned to dated versions (`claude-haiku-4-5-20251001`, `claude-sonnet-4-6`) — never unversioned aliases — so extraction behavior is reproducible across deploys.
 - **Evaluation.** `evals/labeled-posts.json` holds 21 labeled posts (11 Reddit, 10 TheBump, with cross-source duplicate pairs). `pnpm eval` runs the Tier 1 classifier against ground truth and computes cross-source extraction cosine similarity (target ≥ 0.85). This is the regression harness for prompt or model changes.
 
 ## 7. Extending the System

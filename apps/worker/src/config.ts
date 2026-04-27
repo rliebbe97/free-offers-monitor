@@ -9,8 +9,8 @@ getEnvOrThrow('ANTHROPIC_API_KEY');
 getEnvOrThrow('VOYAGE_API_KEY');
 
 // Model strings — pinned to dated versions (PITFALLS.md 4.3: never use unversioned aliases)
-export const TIER1_MODEL = 'claude-haiku-4-20250514';
-export const TIER2_MODEL = 'claude-sonnet-4-5-20250514';
+export const TIER1_MODEL = 'claude-haiku-4-5-20251001';
+export const TIER2_MODEL = 'claude-sonnet-4-6';
 
 // Per-token pricing constants (USD)
 export const MODEL_PRICING = {

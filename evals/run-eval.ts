@@ -44,7 +44,7 @@ interface Tier1Response {
 }
 
 const PASS_THRESHOLD = 0.7; // minimum accuracy to exit 0
-const MODEL = 'claude-haiku-4-20250514'; // matches TIER1_MODEL in config.ts
+const MODEL = 'claude-haiku-4-5-20251001'; // matches TIER1_MODEL in config.ts
 
 /**
  * Compute cosine similarity between two vectors.
@@ -131,9 +131,16 @@ async function main(): Promise<void> {
       const textBlock = response.content.find((block) => block.type === 'text');
       const rawText = textBlock?.type === 'text' ? textBlock.text : '';
 
+      // Newer Haiku versions sometimes wrap JSON in ```json fences despite the prompt
+      // forbidding it. Strip them before parsing so we don't false-flag PARSE ERROR.
+      const cleaned = rawText
+        .replace(/^\s*```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+        .trim();
+
       let parsed: Tier1Response;
       try {
-        parsed = JSON.parse(rawText) as Tier1Response;
+        parsed = JSON.parse(cleaned) as Tier1Response;
       } catch {
         console.error(`  PARSE ERROR for ${post.id}: ${rawText.slice(0, 100)}`);
         total++;

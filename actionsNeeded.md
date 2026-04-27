@@ -16,8 +16,8 @@ Required for Tier 1 (Haiku) and Tier 2 (Sonnet) model calls.
 4. Save as `ANTHROPIC_API_KEY`.
 
 Model IDs used (pinned, do not change without running `pnpm eval`):
-- `claude-haiku-4-20250514`
-- `claude-sonnet-4-5-20250514`
+- `claude-haiku-4-5-20251001`
+- `claude-sonnet-4-6`
 
 ---
 
