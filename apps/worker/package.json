@@ -19,7 +19,6 @@
     "p-limit": "7.3.0",
     "p-retry": "8.0.0",
     "p-throttle": "8.1.0",
-    "snoowrap": "1.23.0",
     "zod": "4.3.6"
   },
   "devDependencies": {

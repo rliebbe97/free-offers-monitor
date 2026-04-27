@@ -6,9 +6,6 @@ export function getEnvOrThrow(name: string): string {
 
 // Validate all required env vars at module load time — fail fast with clear messages
 getEnvOrThrow('ANTHROPIC_API_KEY');
-getEnvOrThrow('REDDIT_CLIENT_ID');
-getEnvOrThrow('REDDIT_CLIENT_SECRET');
-getEnvOrThrow('REDDIT_REFRESH_TOKEN');
 getEnvOrThrow('VOYAGE_API_KEY');
 
 // Model strings — pinned to dated versions (PITFALLS.md 4.3: never use unversioned aliases)
@@ -35,6 +32,11 @@ export const SCRAPING_REQUEST_TIMEOUT_MS = 15_000;
 export const SCRAPING_MAX_RETRIES = 3;
 export const SCRAPING_MAX_PAGES = 10;
 export const THEBUMP_BASE_URL = process.env.THEBUMP_BASE_URL ?? 'https://community.thebump.com';
+
+// Reddit ingestion (public JSON endpoints — no OAuth)
+export const REDDIT_BASE_URL = process.env.REDDIT_BASE_URL ?? 'https://old.reddit.com';
+export const REDDIT_USER_AGENT =
+  process.env.REDDIT_USER_AGENT ?? 'free-offers-monitor/1.0 (by /u/Alternative-Owl-7042)';
 
 // Validation loop constants
 export const VALIDATION_POLL_INTERVAL_MS = 10 * 60 * 1000;   // 10 minutes

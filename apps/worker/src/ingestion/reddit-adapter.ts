@@ -1,7 +1,11 @@
-// @ts-ignore — snoowrap ships its own types but they are incomplete in several places
-import Snoowrap from 'snoowrap';
+import pRetry, { AbortError } from 'p-retry';
 import { logger } from '../logger.js';
-import { getEnvOrThrow } from '../config.js';
+import {
+  REDDIT_BASE_URL,
+  REDDIT_USER_AGENT,
+  SCRAPING_REQUEST_TIMEOUT_MS,
+  SCRAPING_MAX_RETRIES,
+} from '../config.js';
 import type { RawPost, SourceAdapter } from './source-adapter.js';
 
 const BOT_PATTERNS = [/bot$/i, /_bot$/i, /_official$/i];
@@ -10,17 +14,13 @@ const BOT_NAMES = new Set(['AutoModerator']);
 /**
  * Pure predicate — returns true if the post/comment should be skipped.
  * Exported separately for unit testing.
- *
- * @param author - The author name, or null if the account is deleted
- * @param body - The post/comment body text
- * @param distinguished - The Reddit "distinguished" field (e.g. 'moderator')
  */
 export function shouldSkipAuthor(
   author: string | null,
   body: string | null,
   distinguished?: string | null,
 ): boolean {
-  if (author === null) return true; // deleted account
+  if (author === null) return true;
   if (BOT_NAMES.has(author)) return true;
   if (BOT_PATTERNS.some((p) => p.test(author))) return true;
   if (distinguished === 'moderator') return true;
@@ -29,42 +29,86 @@ export function shouldSkipAuthor(
   return false;
 }
 
-/**
- * Creates a snoowrap instance using refresh token OAuth.
- * Reads credentials from environment variables that have already been
- * validated by config.ts at worker startup.
- */
-function createRedditClient(): Snoowrap {
-  // @ts-ignore — snoowrap constructor types do not include refreshToken auth shape
-  return new Snoowrap({
-    userAgent: 'free-offers-monitor/1.0 by u/FreeOffersMonitorBot',
-    clientId: getEnvOrThrow('REDDIT_CLIENT_ID'),
-    clientSecret: getEnvOrThrow('REDDIT_CLIENT_SECRET'),
-    refreshToken: getEnvOrThrow('REDDIT_REFRESH_TOKEN'),
-  });
+interface RedditPostData {
+  id: string;
+  title: string | null;
+  selftext: string | null;
+  author: string | null;
+  url?: string;
+  permalink: string;
+  created_utc: number;
+  distinguished: string | null;
 }
 
-/**
- * Logs a warning when the Reddit API rate limit is running low.
- * snoowrap exposes ratelimitRemaining at runtime but it is not in the type definitions.
- */
-function checkRateLimit(reddit: Snoowrap): void {
-  // @ts-ignore — ratelimitRemaining exists at runtime but is missing from snoowrap type definitions
-  const remaining: number | undefined = reddit.ratelimitRemaining;
-  // @ts-ignore — ratelimitExpiration exists at runtime but is missing from snoowrap type definitions
-  const resetAt: number | undefined = reddit.ratelimitExpiration;
+interface RedditCommentData {
+  id: string;
+  author: string | null;
+  body: string | null;
+  permalink: string;
+  created_utc: number;
+  distinguished: string | null;
+  replies?: RedditCommentListing | '';
+}
 
-  if (remaining !== undefined && remaining < 10) {
-    logger.warn('reddit_ratelimit_low', { remaining, reset_at: resetAt });
-  }
+interface RedditListingChild<T> {
+  kind: string;
+  data: T;
+}
+
+interface RedditCommentListing {
+  kind: 'Listing';
+  data: { children: RedditListingChild<RedditCommentData>[] };
+}
+
+interface RedditPostListing {
+  kind: 'Listing';
+  data: { children: RedditListingChild<RedditPostData>[] };
+}
+
+type RedditCommentsResponse = [RedditPostListing, RedditCommentListing];
+
+async function redditFetchJson<T>(url: string): Promise<T> {
+  const response = await pRetry(
+    async () => {
+      const r = await fetch(url, {
+        signal: AbortSignal.timeout(SCRAPING_REQUEST_TIMEOUT_MS),
+        headers: {
+          'User-Agent': REDDIT_USER_AGENT,
+          Accept: 'application/json',
+        },
+      });
+
+      if (r.status === 404 || r.status === 410) {
+        throw new AbortError(`HTTP ${r.status} for ${url}`);
+      }
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status} for ${url}`);
+      }
+      return r;
+    },
+    {
+      retries: SCRAPING_MAX_RETRIES,
+      minTimeout: 2_000,
+      factor: 2,
+      randomize: true,
+      onFailedAttempt: (error) => {
+        logger.warn('reddit_fetch_retry', {
+          url,
+          attempt: error.attemptNumber,
+          retries_left: error.retriesLeft,
+          error: String(error),
+        });
+      },
+    },
+  );
+
+  return (await response.json()) as T;
 }
 
 export class RedditAdapter implements SourceAdapter {
-  private readonly reddit: Snoowrap;
   private readonly subreddit: string;
 
-  constructor(reddit: Snoowrap, subredditName: string) {
-    this.reddit = reddit;
+  constructor(subredditName: string) {
     this.subreddit = subredditName;
   }
 
@@ -72,124 +116,98 @@ export class RedditAdapter implements SourceAdapter {
     const sinceUnix = Math.floor(since.getTime() / 1000);
     const results: RawPost[] = [];
 
-    // @ts-ignore — getSubreddit returns a Subreddit object; getNew returns a Listing
-    const listing = await this.reddit.getSubreddit(this.subreddit).getNew({ limit: 25 });
-    checkRateLimit(this.reddit);
+    const listingUrl = `${REDDIT_BASE_URL}/r/${this.subreddit}/new.json?limit=25&raw_json=1`;
+    const listing = await redditFetchJson<RedditPostListing>(listingUrl);
 
-    // @ts-ignore — listing is iterable but its type does not expose iterator in all snoowrap versions
-    for (const post of listing) {
-      // @ts-ignore — post.created_utc is a unix timestamp; exists at runtime
+    for (const child of listing.data.children) {
+      if (child.kind !== 't3') continue;
+      const post = child.data;
+
       if (post.created_utc < sinceUnix) continue;
 
-      // @ts-ignore — post.author may be null on deleted accounts
-      const authorName: string | null = post.author ? post.author.name ?? null : null;
-      // @ts-ignore — post.selftext is the post body
-      const body: string | null = post.selftext ?? null;
-      // @ts-ignore — post.distinguished is the moderation flag
-      const distinguished: string | null = post.distinguished ?? null;
-
-      if (shouldSkipAuthor(authorName, body, distinguished)) {
+      if (shouldSkipAuthor(post.author, post.selftext, post.distinguished)) {
         logger.info('reddit_skip_post', {
           external_id: post.id,
           reason: 'bot_or_deleted',
-          author: authorName,
+          author: post.author,
         });
         continue;
       }
 
-      // @ts-ignore — post.url is the post URL
-      const postUrl: string = post.url ?? `https://reddit.com/r/${this.subreddit}/comments/${post.id}`;
-      // @ts-ignore — post.title is the submission title
-      const postTitle: string | null = post.title ?? null;
-      // @ts-ignore — post.created_utc is seconds since epoch
-      const postedAt = new Date((post.created_utc as number) * 1000);
+      const postUrl = post.url ?? `https://reddit.com${post.permalink}`;
 
       results.push({
-        external_id: post.id as string,
+        external_id: post.id,
         url: postUrl,
-        title: postTitle,
-        body,
-        author: authorName,
-        posted_at: postedAt,
+        title: post.title,
+        body: post.selftext,
+        author: post.author,
+        posted_at: new Date(post.created_utc * 1000),
       });
 
-      // Fetch comments for this post (top-level + one reply deep)
-      // @ts-ignore — post.comments is a CommentListing
-      const topLevelComments = post.comments ?? [];
+      const commentsUrl = `${REDDIT_BASE_URL}/r/${this.subreddit}/comments/${post.id}.json?limit=top&depth=2&raw_json=1`;
+      let commentsResp: RedditCommentsResponse;
+      try {
+        commentsResp = await redditFetchJson<RedditCommentsResponse>(commentsUrl);
+      } catch (err) {
+        logger.warn('reddit_comments_fetch_failed', {
+          post_id: post.id,
+          error: String(err),
+        });
+        continue;
+      }
 
-      for (const comment of topLevelComments) {
-        // Skip MoreComments stubs — calling fetchMore() in the hot path costs extra API requests
-        if (comment.constructor.name === 'MoreComments') continue;
+      const commentChildren = commentsResp[1]?.data.children ?? [];
+      for (const c of commentChildren) {
+        if (c.kind !== 't1') continue;
+        const comment = c.data;
 
-        // @ts-ignore — comment.author may be null on deleted accounts
-        const commentAuthor: string | null = comment.author ? comment.author.name ?? null : null;
-        // @ts-ignore — comment.body is the comment text
-        const commentBody: string | null = comment.body ?? null;
-        // @ts-ignore — comment.distinguished is the moderation flag
-        const commentDistinguished: string | null = comment.distinguished ?? null;
-
-        if (shouldSkipAuthor(commentAuthor, commentBody, commentDistinguished)) {
+        if (shouldSkipAuthor(comment.author, comment.body, comment.distinguished)) {
           logger.info('reddit_skip_comment', {
             external_id: comment.id,
             reason: 'bot_or_deleted',
-            author: commentAuthor,
+            author: comment.author,
           });
           continue;
         }
 
-        // @ts-ignore — comment.permalink is the comment URL
-        const commentUrl = `https://reddit.com${comment.permalink ?? ''}`;
-        // @ts-ignore — comment.created_utc is seconds since epoch
-        const commentPostedAt = new Date(((comment.created_utc as number) ?? 0) * 1000);
-
         results.push({
-          external_id: comment.id as string,
-          url: commentUrl,
+          external_id: comment.id,
+          url: `https://reddit.com${comment.permalink}`,
           title: null,
-          body: commentBody,
-          author: commentAuthor,
-          posted_at: commentPostedAt,
+          body: comment.body,
+          author: comment.author,
+          posted_at: new Date(comment.created_utc * 1000),
         });
 
-        // One reply deep
-        // @ts-ignore — comment.replies is a CommentListing or empty array
-        const replies = comment.replies ?? [];
-        for (const reply of replies) {
-          if (reply.constructor.name === 'MoreComments') continue;
+        const replies =
+          typeof comment.replies === 'object' && comment.replies !== null
+            ? comment.replies.data.children
+            : [];
 
-          // @ts-ignore — reply.author may be null on deleted accounts
-          const replyAuthor: string | null = reply.author ? reply.author.name ?? null : null;
-          // @ts-ignore — reply.body is the reply text
-          const replyBody: string | null = reply.body ?? null;
-          // @ts-ignore — reply.distinguished is the moderation flag
-          const replyDistinguished: string | null = reply.distinguished ?? null;
+        for (const r of replies) {
+          if (r.kind !== 't1') continue;
+          const reply = r.data;
 
-          if (shouldSkipAuthor(replyAuthor, replyBody, replyDistinguished)) {
+          if (shouldSkipAuthor(reply.author, reply.body, reply.distinguished)) {
             logger.info('reddit_skip_reply', {
               external_id: reply.id,
               reason: 'bot_or_deleted',
-              author: replyAuthor,
+              author: reply.author,
             });
             continue;
           }
 
-          // @ts-ignore — reply.permalink is the reply URL
-          const replyUrl = `https://reddit.com${reply.permalink ?? ''}`;
-          // @ts-ignore — reply.created_utc is seconds since epoch
-          const replyPostedAt = new Date(((reply.created_utc as number) ?? 0) * 1000);
-
           results.push({
-            external_id: reply.id as string,
-            url: replyUrl,
+            external_id: reply.id,
+            url: `https://reddit.com${reply.permalink}`,
             title: null,
-            body: replyBody,
-            author: replyAuthor,
-            posted_at: replyPostedAt,
+            body: reply.body,
+            author: reply.author,
+            posted_at: new Date(reply.created_utc * 1000),
           });
         }
       }
-
-      checkRateLimit(this.reddit);
     }
 
     logger.info('reddit_fetch_complete', {
@@ -201,10 +219,6 @@ export class RedditAdapter implements SourceAdapter {
   }
 }
 
-/**
- * Factory function — creates a snoowrap client and returns a RedditAdapter instance.
- */
 export function createRedditAdapter(subredditName: string): RedditAdapter {
-  const reddit = createRedditClient();
-  return new RedditAdapter(reddit, subredditName);
+  return new RedditAdapter(subredditName);
 }
