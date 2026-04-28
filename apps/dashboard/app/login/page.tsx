@@ -1,11 +1,14 @@
 import type { Metadata } from 'next';
 import { LoginForm } from '@/components/auth/login-form';
+import { DevSignInButton } from '@/components/auth/dev-signin-button';
 
 export const metadata: Metadata = {
   title: 'Sign in — Free Offers Monitor',
 };
 
 export default function LoginPage() {
+  const isDev = process.env.NODE_ENV !== 'production';
+
   return (
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-sm space-y-6">
@@ -16,6 +19,7 @@ export default function LoginPage() {
           </p>
         </div>
         <LoginForm />
+        {isDev && <DevSignInButton />}
       </div>
     </div>
   );
