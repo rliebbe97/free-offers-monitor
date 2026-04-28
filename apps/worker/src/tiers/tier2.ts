@@ -31,8 +31,9 @@ export const EXTRACT_OFFER_TOOL = {
         description: 'The company or brand offering the product',
       },
       destination_url: {
-        type: 'string',
-        description: 'Primary URL to claim the offer; use the post URL if none is provided',
+        type: ['string', 'null'],
+        description:
+          'Primary URL to claim the offer, taken VERBATIM from the post text. Use null if no URL appears in the post — never invent or guess one, never fall back to the post discussion URL.',
       },
       category: {
         type: 'string',
@@ -424,7 +425,36 @@ export async function processTier2(options: ProcessTier2Options): Promise<void> 
     return;
   }
 
-  // Step 8: Low-confidence routing
+  // Step 8a: Missing destination URL → review queue (admin will fill it in via the dashboard)
+  if (extraction.destination_url === null) {
+    const { error: reviewError } = await db.from('human_review_queue').insert({
+      post_id: postId,
+      tier2_result: tier2Result,
+      confidence: extraction.confidence,
+    });
+
+    if (reviewError) {
+      throw new Error(`Failed to insert into human_review_queue: ${reviewError.message}`);
+    }
+
+    const { error: updateError } = await db
+      .from('posts')
+      .update({ tier2_result: tier2Result, pipeline_status: 'review_queued' })
+      .eq('id', postId);
+
+    if (updateError) {
+      throw new Error(`Failed to update post as review_queued: ${updateError.message}`);
+    }
+
+    logger.info('tier2_review_queued', {
+      post_id: postId,
+      reason: 'missing_destination_url',
+      confidence: extraction.confidence,
+    });
+    return;
+  }
+
+  // Step 8b: Low-confidence routing
   if (extraction.confidence < 0.7) {
     const { error: reviewError } = await db.from('human_review_queue').insert({
       post_id: postId,

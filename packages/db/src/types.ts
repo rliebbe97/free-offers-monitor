@@ -98,8 +98,8 @@ export interface Database {
       offers: {
         Row: {
           id: string;
-          destination_url: string;
-          destination_url_hash: string;
+          destination_url: string | null;
+          destination_url_hash: string | null;
           title: string;
           description: string | null;
           brand: string | null;
@@ -118,8 +118,8 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          destination_url: string;
-          destination_url_hash: string;
+          destination_url?: string | null;
+          destination_url_hash?: string | null;
           title: string;
           description?: string | null;
           brand?: string | null;
@@ -138,8 +138,8 @@ export interface Database {
         };
         Update: {
           id?: string;
-          destination_url?: string;
-          destination_url_hash?: string;
+          destination_url?: string | null;
+          destination_url_hash?: string | null;
           title?: string;
           description?: string | null;
           brand?: string | null;

@@ -1,4 +1,5 @@
-import { ExternalLink } from 'lucide-react';
+import Link from 'next/link';
+import { ExternalLink, Pencil } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -14,7 +15,7 @@ type OfferRow = {
   id: string;
   title: string;
   status: string;
-  destination_url: string;
+  destination_url: string | null;
   extraction_confidence: number | null;
   created_at: string;
 };
@@ -55,6 +56,7 @@ export function OffersTable({ offers }: Props) {
           <TableHead className="text-xs uppercase tracking-wider">URL</TableHead>
           <TableHead className="text-xs uppercase tracking-wider">Confidence</TableHead>
           <TableHead className="text-xs uppercase tracking-wider">Created</TableHead>
+          <TableHead className="text-xs uppercase tracking-wider sr-only">Edit</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -67,20 +69,24 @@ export function OffersTable({ offers }: Props) {
               </Badge>
             </TableCell>
             <TableCell>
-              <a
-                href={offer.destination_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={offer.destination_url}
-                className="inline-flex items-center gap-1 text-sm hover:underline"
-              >
-                <span>
-                  {offer.destination_url.length > 40
-                    ? offer.destination_url.slice(0, 40) + '...'
-                    : offer.destination_url}
-                </span>
-                <ExternalLink size={12} />
-              </a>
+              {offer.destination_url ? (
+                <a
+                  href={offer.destination_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={offer.destination_url}
+                  className="inline-flex items-center gap-1 text-sm hover:underline"
+                >
+                  <span>
+                    {offer.destination_url.length > 40
+                      ? offer.destination_url.slice(0, 40) + '...'
+                      : offer.destination_url}
+                  </span>
+                  <ExternalLink size={12} />
+                </a>
+              ) : (
+                <span className="text-xs italic text-amber-600">missing — needs admin</span>
+              )}
             </TableCell>
             <TableCell>
               {offer.extraction_confidence != null ? (
@@ -98,6 +104,16 @@ export function OffersTable({ offers }: Props) {
             </TableCell>
             <TableCell className="text-sm">
               {new Date(offer.created_at).toLocaleDateString()}
+            </TableCell>
+            <TableCell>
+              <Link
+                href={`/dashboard/offers/${offer.id}/edit`}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                aria-label={`Edit ${offer.title}`}
+              >
+                <Pencil size={12} />
+                <span>Edit</span>
+              </Link>
             </TableCell>
           </TableRow>
         ))}

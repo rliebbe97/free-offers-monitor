@@ -59,8 +59,8 @@ CREATE INDEX posts_source_id_idx ON posts(source_id);
 
 CREATE TABLE offers (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  destination_url       text NOT NULL,
-  destination_url_hash  text NOT NULL,             -- sha256 of normalized URL
+  destination_url       text,                      -- NULL when extractor couldn't find one in the post; admin fills in via dashboard
+  destination_url_hash  text,                      -- sha256 of normalized URL; NULL until destination_url is set
   title                 text NOT NULL,
   description           text,
   brand                 text,

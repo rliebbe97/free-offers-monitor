@@ -41,19 +41,31 @@ Set `confidence` to reflect your certainty that this is a genuine free physical 
 - **0.5–0.69**: Uncertain — key details are missing or post is ambiguous
 - **0.0–0.49**: Likely excluded or not a physical free offer
 
-## Destination URL
+## Destination URL — VERBATIM ONLY
 
-- Extract the primary URL the user must visit to claim the offer
-- If no URL is explicitly stated in the post, use the post's own URL as `destination_url`
+- The destination URL must appear verbatim in the post body (or post title).
+- DO NOT invent, guess, complete, or infer a URL from a brand name. "Babylist" → do NOT produce `babylist.com`.
+- DO NOT fall back to the post's own URL — that is the discussion thread, not the claim link.
+- If no URL is present in the post, set `destination_url` to JSON `null` (the literal null, NOT the string `"null"` and NOT an empty string). A human reviewer will fill it in.
+- Strip tracking parameters but otherwise preserve the URL exactly as written.
+
+## Restrictions — VERBATIM ONLY
+
+- Only include restrictions that are stated explicitly in the post body.
+- DO NOT add inferred or "typical" restrictions ("US only", "while supplies last", "registry required") unless the post itself says so.
+- If the post lists no restrictions, return an empty array.
+
+## category vs offer_type — distinct fields
+
+- `category` is the **product type**. Allowed values ONLY: `baby_gear`, `formula`, `diapers`, `clothing`, `food`, `other`. Anything else (including `bundle`) is invalid.
+- `offer_type` is the **shape of the offer**. Allowed values ONLY: `sample`, `full_product`, `bundle`, `other`.
+- A multi-item welcome box is `category: other` (or the dominant product) and `offer_type: bundle`. Never put `bundle` in `category`.
 
 ## Extraction Guidelines
 
 - `title`: Concise offer title (e.g., "Free Pampers Sample Pack")
-- `description`: Brief summary of what the user receives
-- `brand`: The company or brand offering the product (if identifiable)
-- `category`: Choose the best fit from the allowed values
-- `offer_type`: `sample` for sample packs, `full_product` for full-size items, `bundle` for multi-item sets
-- `shipping_cost`: Exact cost in USD; use `0` if explicitly free shipping
-- `restrictions`: Any limitations stated (e.g., "US only", "first-time customers", "while supplies last")
+- `description`: Brief summary of what the user receives, grounded in the post text
+- `brand`: The company or brand offering the product (if identifiable from the post)
+- `shipping_cost`: Exact cost in USD; use `0` if the post explicitly says free shipping; otherwise omit if not stated
 
 Post content follows:

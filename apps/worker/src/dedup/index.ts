@@ -56,6 +56,15 @@ export async function runDedup(options: {
 }): Promise<{ offerId: string; isNew: boolean }> {
   const { db, postId, extraction } = options;
 
+  // Invariant: tier2 routes null-URL extractions to human_review_queue before
+  // dedup is reached. If we land here with a null URL, the upstream guard is
+  // broken — fail loudly rather than insert a hash-less offer.
+  if (extraction.destination_url === null) {
+    throw new Error(
+      `runDedup invoked with null destination_url for post ${postId} — should have been routed to review_queue`,
+    );
+  }
+
   // Step 1: URL hash check
   const { normalizedUrl, hash } = await normalizeAndHash(extraction.destination_url);
 

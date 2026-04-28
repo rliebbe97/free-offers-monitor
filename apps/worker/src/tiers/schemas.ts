@@ -27,7 +27,13 @@ export const OfferExtractionSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   brand: z.string().optional(),
-  destination_url: z.string().url(),
+  destination_url: z.preprocess(
+    // Sonnet sometimes returns the literal string "null" or "" instead of JSON
+    // null when the tool schema accepts ["string", "null"]. Coerce those to
+    // actual null before URL validation.
+    (v) => (v === 'null' || v === '' ? null : v),
+    z.string().url().nullable(),
+  ),
   category: z.enum(['baby_gear', 'formula', 'diapers', 'clothing', 'food', 'other']).optional(),
   offer_type: z.enum(['sample', 'full_product', 'bundle', 'other']).optional(),
   shipping_cost: z.number().min(0).default(0),
