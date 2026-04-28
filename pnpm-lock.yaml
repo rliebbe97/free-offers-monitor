@@ -146,6 +146,15 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/node@22.15.3)(jiti@2.6.1)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.15.3)(typescript@5.9.2))(tsx@4.21.0)
 
+  evals:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: 0.90.0
+        version: 0.90.0(zod@4.3.6)
+      '@repo/db':
+        specifier: workspace:*
+        version: link:../packages/db
+
   packages/db:
     dependencies:
       '@supabase/supabase-js':
