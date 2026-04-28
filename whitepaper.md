@@ -58,9 +58,9 @@ interface SourceAdapter {
 A factory (`createAdapterForSource`) dispatches on `sources.type`. Two adapters ship today:
 
 - **RedditAdapter** — calls Reddit's public JSON endpoints (`/r/<sub>/new.json`, `/r/<sub>/comments/<id>.json`) over plain `fetch`. No OAuth, no client ID, no refresh token. Fetches the 25 newest posts per configured subreddit, then ingests top-level comments plus one reply deep, filtering out AutoModerator / `[deleted]` / bot accounts and moderator-distinguished items. Identification to Reddit is via a descriptive `User-Agent` (`free-offers-monitor/1.0 (by /u/Alternative-Owl-7042)` by default, overridable via `REDDIT_USER_AGENT`). Retries with exponential backoff on transient errors, aborts immediately on 404/410. This path was chosen because Reddit's `/prefs/apps` registration is currently effectively closed for new applicants — the redditdev community recommends public-endpoint polling, and steady-state usage (~2.4 req/min across 12 subs) sits comfortably under unauthenticated rate caps.
-- **TheBumpAdapter** — extends a `BaseForumAdapter` abstract class that implements template-method pagination for Discourse-shaped forums. Uses `fetch` + Cheerio with polite 1–3s delays, detects Cloudflare challenges, and terminates when pages exceed the `since` watermark or a hard page cap.
+- **TheBumpAdapter** — extends a `BaseForumAdapter` abstract class that implements template-method pagination for HTML forums. Uses `fetch` + Cheerio with polite 1–3s delays, detects Cloudflare challenges, and terminates when pages exceed the `since` watermark or a hard page cap.
 
-New sources are added by implementing `SourceAdapter`, registering in the factory, and inserting a row into the `sources` table.
+New sources are added by implementing `SourceAdapter`, registering in the factory, and inserting a row into the `sources` table. Step-by-step guidance lives in [`apps/worker/src/ingestion/ADDING-SOURCES.md`](apps/worker/src/ingestion/ADDING-SOURCES.md), including the "same platform, new feed" path that requires only a seed migration.
 
 ### 3.2 Tier 0 — Keyword Filter
 
@@ -183,7 +183,7 @@ Required Postgres extensions (must be enabled on the Supabase project): `vector`
 
 ## 7. Extending the System
 
-- **New ingestion source.** Implement `SourceAdapter`, register in the factory, insert a `sources` row. Forum-shaped sources should extend `BaseForumAdapter` to inherit pagination.
+- **New ingestion source.** Implement `SourceAdapter`, register in `createAdapterForSource`, insert a `sources` row. Forum-shaped sources should extend `BaseForumAdapter` to inherit pagination. If the new feed runs on an already-supported platform, only a seed migration is needed. Full walkthrough in [`apps/worker/src/ingestion/ADDING-SOURCES.md`](apps/worker/src/ingestion/ADDING-SOURCES.md).
 - **New exclusion rule.** Edit `prompts/tier2-extract.md`, add a labeled counter-example to `evals/labeled-posts.json`, run `pnpm eval`, commit. The git SHA will propagate into `ai_calls.prompt_version` automatically.
 - **New category.** Add the enum value to the `extract_offer` tool schema in `apps/worker/src/tiers/tier2.ts` *and* the Zod schema in `apps/worker/src/tiers/schemas.ts` *and* the `offers.category` check constraint in `schema.sql`. All three must stay in sync.
 - **Tighter dedup.** Raise `EMBEDDING_SIMILARITY_THRESHOLD` in config, retune `ivfflat.probes` as the offer table grows (rule of thumb: `sqrt(row_count)`).
