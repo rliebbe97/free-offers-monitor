@@ -1,9 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const envFile = join(__dirname, '..', '.env.local');
+if (existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 // NOTE: ai_calls logging exemption — this eval script is a dev-time-only tool
 // that runs outside the production worker pipeline. No DB connection exists here.

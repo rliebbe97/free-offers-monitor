@@ -1,9 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const envFile = join(__dirname, '..', '.env.local');
+if (existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 // Standalone demo — runs a small set of labeled posts through Tier 1 (Haiku) and,
 // when Tier 1 passes, Tier 2 (Sonnet w/ tool use). Prints input + raw output for
